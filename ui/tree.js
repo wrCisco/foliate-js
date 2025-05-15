@@ -111,6 +111,8 @@ export const createTOCView = (toc, onclick) => {
         currentItem = el
     }
 
+    const getCurrentItem = () => currentItem
+
     const acceptNode = node => isTreeItem(node) && node.offsetParent
         ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
     const iter = document.createTreeWalker($toc, 1, { acceptNode })
@@ -164,5 +166,5 @@ export const createTOCView = (toc, onclick) => {
         }
     })
 
-    return { element: $toc, setCurrentHref }
+    return { element: $toc, setCurrentHref, getCurrentItem }
 }
