@@ -1,4 +1,4 @@
-const createMenuItemRadioGroup = (label, arr, onclick, horizontal) => {
+const createMenuItemRadioGroup = (label, arr, onclick, onvalidate, horizontal) => {
     const container = document.createElement('fieldset')
     const header = document.createElement('legend')
     header.innerText = label
@@ -20,6 +20,8 @@ const createMenuItemRadioGroup = (label, arr, onclick, horizontal) => {
             ? container.setAttribute('aria-disabled', 'true')
             : container.setAttribute('aria-disabled', 'false')
     }
+    const acceptedValues = []
+    const validate = onvalidate ?? ((value) => acceptedValues.includes(value))
     for (const [label, value] of arr) {
         const item = document.createElement('li')
         item.setAttribute('role', 'menuitemradio')
@@ -28,9 +30,10 @@ const createMenuItemRadioGroup = (label, arr, onclick, horizontal) => {
         item.onkeydown = (e) => { if (e.key === ' ') select(value) }
         map.set(value, item)
         group.append(item)
+        acceptedValues.push(value)
     }
     container.append(header, group)
-    return { element: container, select, enable }
+    return { element: container, select, enable, validate }
 }
 
 const createActionMenuItem = (label, shortcut, onclick, ...args) => {
@@ -89,11 +92,11 @@ export const createMenu = arr => {
     window.addEventListener('blur', element.hide)
     element.addEventListener('click', (e) => e.stopPropagation())
 
-    for (const { name, label, type, items, onclick, horizontal, shortcut } of arr) {
+    for (const { name, label, type, items, onclick, onvalidate, horizontal, shortcut } of arr) {
         let widget
         switch (type) {
             case 'radio':
-                widget = createMenuItemRadioGroup(label, items, hideAnd(onclick), horizontal)
+                widget = createMenuItemRadioGroup(label, items, hideAnd(onclick), onvalidate, horizontal)
                 break
             case 'action':
                 widget = createActionMenuItem(label, shortcut, hideAnd(onclick))
