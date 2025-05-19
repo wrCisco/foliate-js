@@ -39,7 +39,7 @@ const createMenuItemRadioGroup = (label, arr, onclick, onvalidate, horizontal) =
             v = value
         }
         else {
-            const { val, type, attrs, onchange, prefix = '', suffix = '' } = value
+            const { val, type, attrs, onchange, prefix = '', suffix = '', labelID } = value
             const containerInput = document.createElement('span')
             if (attrs.id)
                 containerInput.id = attrs.id + '-container'
@@ -49,6 +49,10 @@ const createMenuItemRadioGroup = (label, arr, onclick, onvalidate, horizontal) =
                 input.setAttribute(attr, val)
             }
             input.onchange = onchange
+            if (labelID) {
+                item.id = labelID
+                input.setAttribute('aria-labelledby', labelID)
+            }
             containerInput.append(prefix, input, suffix)
             item.append(containerInput)
             v = val
@@ -174,7 +178,13 @@ export const createMenu = arr => {
     const updateFocus = (cur, next) => {
         cur.tabIndex = -1
         next.tabIndex = 0
-        next.focus()
+        const subItem = next.querySelector('input')
+        if (subItem) {
+            subItem.focus()
+        }
+        else {
+            next.focus()
+        }
         currentItem = next
     }
 
