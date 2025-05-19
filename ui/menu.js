@@ -210,8 +210,19 @@ export const createMenu = arr => {
         || item.parentElement.getAttribute('disabled')
         || item.parentElement.getAttribute('aria-disabled') === 'true'
     )
+    const isVisible = item => {
+        let node = item
+        while (node && node !== element) {
+            const style = globalThis.getComputedStyle(node)
+            if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) === 0) {
+                return false
+            }
+            node = node.parentElement
+        }
+        return true
+    }
 
-    const acceptNode = node => isMenuItem(node)
+    const acceptNode = node => (isMenuItem(node) && isVisible(node))
         ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP
     const iter = document.createTreeWalker(element, 1, { acceptNode })
     const getIter = current => (iter.currentNode = current, iter)
