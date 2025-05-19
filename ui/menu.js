@@ -286,11 +286,31 @@ export const createMenu = arr => {
                     break
                 }
                 case 'Home':
-                    updateFocus(currentTarget, menuItems[0])
+                    let target = getIter(currentTarget).previousNode()
+                    while (target) {
+                        let prev = getIter(target).previousNode()
+                        if (prev) {
+                            target = prev
+                        }
+                        else {
+                            break
+                        }
+                    }
+                    if (target) updateFocus(currentTarget, target)
                     stop = true
                     break
                 case 'End': {
-                    updateFocus(currentTarget, menuItems[menuItems.length - 1])
+                    let target = getIter(currentTarget).nextNode()
+                    while (target) {
+                        let next = getIter(target).nextNode()
+                        if (next) {
+                            target = next
+                        }
+                        else {
+                            break
+                        }
+                    }
+                    if (target) updateFocus(currentTarget, target)
                     stop = true
                     break
                 }
