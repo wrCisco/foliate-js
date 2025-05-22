@@ -12,11 +12,11 @@ const createMenuItemRadioGroup = (label, arr, onclick, onvalidate, horizontal) =
     const current = () => currentValue
     const select = value => {
         if (container.getAttribute('aria-disabled') === 'true') return
-        onclick(value)
         currentValue = value
         const item = map.get(value)
         for (const child of group.children)
             child.setAttribute('aria-checked', child === item ? 'true' : 'false')
+        onclick(value)
     }
     const enable = (activate) => {
         activate === false
