@@ -17,7 +17,12 @@ export class Overlayer {
     add(key, range, draw, options) {
         if (this.#map.has(key)) this.remove(key)
         if (typeof range === 'function') range = range(this.#svg.getRootNode())
-        const rects = range.getClientRects()
+        let rects = range.getClientRects()
+        // Sometimes Chromium based browsers return an empty DOMRectList
+        // (cfr. https://issues.chromium.org/issues/41387258)
+        if (rects.length === 0 && range.startContainer) {
+            rects = range.startContainer.getClientRects()
+        }
         const element = draw(rects, options)
         this.#svg.append(element)
         this.#map.set(key, { range, draw, options, element, rects })
@@ -31,7 +36,10 @@ export class Overlayer {
         for (const obj of this.#map.values()) {
             const { range, draw, options, element } = obj
             this.#svg.removeChild(element)
-            const rects = range.getClientRects()
+            let rects = range.getClientRects()
+            if (rects.length === 0 && range.startContainer) {
+                rects = range.startContainer.getClientRects()
+            }
             const el = draw(rects, options)
             this.#svg.append(el)
             obj.element = el
@@ -43,9 +51,19 @@ export class Overlayer {
         // loop in reverse to hit more recently added items first
         for (let i = arr.length - 1; i >= 0; i--) {
             const [key, obj] = arr[i]
-            for (const { left, top, right, bottom } of obj.rects)
-                if (top <= y && left <= x && bottom > y && right > x)
+            if (obj.options?.type === 'page-list') {
+                let { left, top, right, bottom, width, height } = obj.rects[0]
+                const offsetH = 10
+                const offsetV = 10
+                if (top - offsetV <= y && left - offsetH <= x && top + offsetV * 3 > y && left + offsetH * 3 > x) {
                     return [key, obj.range]
+                }
+            }
+            else {
+                for (const { left, top, right, bottom } of obj.rects)
+                    if (top <= y && left <= x && bottom > y && right > x)
+                        return [key, obj.range]
+            }
         }
         return []
     }
