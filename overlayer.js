@@ -20,8 +20,12 @@ export class Overlayer {
         let rects = range.getClientRects()
         // Sometimes Chromium based browsers return an empty DOMRectList
         // (cfr. https://issues.chromium.org/issues/41387258)
-        if (rects.length === 0 && range.startContainer) {
-            rects = range.startContainer.getClientRects()
+        if (rects.length === 0 && range.startContainer?.nodeType === Node.ELEMENT_NODE) {
+            rects = range.startContainer.getClientRects() ?? []
+        }
+        if (rects.length === 0) {
+            console.warning('Overlayer: no rects to draw for range', range)
+            return
         }
         const element = draw(rects, options)
         this.#svg.append(element)
@@ -37,8 +41,8 @@ export class Overlayer {
             const { range, draw, options, element } = obj
             this.#svg.removeChild(element)
             let rects = range.getClientRects()
-            if (rects.length === 0 && range.startContainer) {
-                rects = range.startContainer.getClientRects()
+            if (rects.length === 0 && range.startContainer?.nodeType === Node.ELEMENT_NODE) {
+                rects = range.startContainer.getClientRects() ?? []
             }
             const el = draw(rects, options)
             this.#svg.append(el)
