@@ -27,7 +27,10 @@ const createTOCItemElement = (list, map, onclick) => {
             a.href = href
             a.onclick = event => {
                 event.preventDefault()
-                onclick(href)
+                // 'data-simebv-cfi' is a workaround for page list items
+                // that reference an element with display none, which breaks
+                // the standard navigation via href
+                onclick(a.getAttribute('data-simebv-cfi') ?? href)
             }
         } else a.onclick = event => a.firstElementChild?.onclick(event)
 
