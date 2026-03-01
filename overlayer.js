@@ -56,7 +56,15 @@ export class Overlayer {
         for (let i = arr.length - 1; i >= 0; i--) {
             const [key, obj] = arr[i]
             if (obj.options?.type === 'page-list') {
-                let { left, top, right, bottom, width, height } = obj.rects[0]
+                let rect
+                for (let j = 0; j < obj.rects.length; j++) {
+                    if (obj.rects[j].height) {
+                        rect = obj.rects[j]
+                        break
+                    }
+                }
+                if (!rect) rect = obj.rects[0]
+                let { left, top, right, bottom, width, height } = rect
                 const offsetH = 10
                 const offsetV = 10
                 if (top - offsetV <= y && left - offsetH <= x && top + offsetV * 3 > y && left + offsetH * 3 > x) {
