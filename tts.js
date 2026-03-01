@@ -236,12 +236,12 @@ export class TTS {
     start() {
         this.#lastMark = null
         const [doc] = this.#list.first() ?? []
-        if (!doc) return this.next()
+        if (!doc) return this.next(true)
         return this.#speak(doc, ssml => this.#getMarkElement(ssml, this.#lastMark))
     }
     resume() {
         const [doc] = this.#list.current() ?? []
-        if (!doc) return this.next()
+        if (!doc) return this.next(true)
         return this.#speak(doc, ssml => this.#getMarkElement(ssml, this.#lastMark))
     }
     prev(paused) {
