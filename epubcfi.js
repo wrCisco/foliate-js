@@ -258,7 +258,11 @@ const partsToNode = (node, parts, filter) => {
 }
 
 const nodeToParts = (node, offset, filter) => {
-    const { parentNode, id } = node
+    let { id, parentNode } = node
+    while (filter && parentNode
+        && parentNode !== node.ownerDocument.documentElement
+        && filter(parentNode) === NodeFilter.FILTER_SKIP)
+        parentNode = parentNode.parentNode
     const indexed = indexChildNodes(parentNode, filter)
     const index = indexed.findIndex(x =>
         Array.isArray(x) ? x.some(x => x === node) : x === node)
@@ -310,11 +314,11 @@ export const toRange = (doc, parts, filter) => {
 }
 
 // faster way of getting CFIs for sorted elements in a single parent
-export const fromElements = elements => {
+export const fromElements = (elements, filter) => {
     const results = []
     const { parentNode } = elements[0]
-    const parts = nodeToParts(parentNode)
-    for (const [index, node] of indexChildNodes(parentNode).entries()) {
+    const parts = nodeToParts(parentNode, filter)
+    for (const [index, node] of indexChildNodes(parentNode, filter).entries()) {
         const el = elements[results.length]
         if (node === el)
             results.push(toString([parts.concat({ id: el.id, index })]))
@@ -322,8 +326,8 @@ export const fromElements = elements => {
     return results
 }
 
-export const toElement = (doc, parts) =>
-    partsToNode(doc.documentElement, collapse(parts)).node
+export const toElement = (doc, parts, filter) =>
+    partsToNode(doc.documentElement, collapse(parts), filter).node
 
 // turn indices into standard CFIs when you don't have an actual package document
 export const fake = {
