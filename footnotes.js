@@ -68,8 +68,10 @@ export class FootnoteHandler extends EventTarget {
                             else range.selectNode(el)
                         }
                         const frag = range.extractContents()
+                        const fragContainer = document.createElement('div')
+                        fragContainer.appendChild(frag)
                         doc.body.replaceChildren()
-                        doc.body.appendChild(frag)
+                        doc.body.appendChild(fragContainer)
                     }
                     const detail = { view, href, type, hidden, target: el }
                     this.dispatchEvent(new CustomEvent('render', { detail }))
