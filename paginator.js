@@ -512,7 +512,7 @@ export class Paginator extends HTMLElement {
             grid-column: 1 / -1;
             grid-row: 1 / -1;
             overflow: auto;
-            margin-block: 3.4em;
+            margin-block: var(--_margin);
         }
         #header {
             grid-column: 3 / 4;
