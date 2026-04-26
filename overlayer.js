@@ -24,7 +24,7 @@ export class Overlayer {
             rects = range.startContainer.getClientRects() ?? []
         }
         if (rects.length === 0) {
-            console.warning('Overlayer: no rects to draw for range', range)
+            console.warn('Overlayer: no rects to draw for range', range)
             return
         }
         const element = draw(rects, options)
