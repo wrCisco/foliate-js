@@ -1,4 +1,5 @@
-const pdfjsPath = path => new URL(`./vendor/pdfjs/${path}`, import.meta.url).toString()
+const PDFJS_BASE = new URL(/* @vite-ignore */'../vendor/pdfjs/', import.meta.url).href
+const pdfjsPath = path => PDFJS_BASE + path
 
 import './vendor/pdfjs/pdf.mjs'
 const pdfjsLib = globalThis.pdfjsLib
