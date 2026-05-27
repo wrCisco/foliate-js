@@ -1,4 +1,4 @@
-import * as CFI from './epubcfi.js'
+import * as defaultCFI from './epubcfi.js'
 
 const NS = {
     CONTAINER: 'urn:oasis:names:tc:opendocument:xmlns:container',
@@ -631,8 +631,9 @@ class Encryption {
 }
 
 class Resources {
-    constructor({ opf, resolveHref }) {
+    constructor({ opf, resolveHref, CFI }) {
         this.opf = opf
+        this.CFI = CFI
         const { $, $$, $$$ } = childGetter(opf, NS.OPF)
 
         const $manifest = $(opf.documentElement, 'manifest')
@@ -674,7 +675,7 @@ class Resources {
             ?? this.getItemByHref(this.guide
                 ?.find(ref => ref.type.includes('cover'))?.href)
 
-        this.cfis = CFI.fromElements($$itemref)
+        this.cfis = this.CFI.fromElements($$itemref)
     }
     getItemByID(id) {
         return this.manifestById.get(id)
@@ -685,20 +686,20 @@ class Resources {
     getItemByProperty(prop) {
         return this.manifest.find(item => item.properties?.includes(prop))
     }
-    resolveCFI(cfi, filter) {
-        const parts = CFI.parse(cfi)
+    resolveCFI(cfi) {
+        const parts = this.CFI.parse(cfi)
         const top = (parts.parent ?? parts).shift()
-        let $itemref = CFI.toElement(this.opf, top, filter)
+        let $itemref = this.CFI.toElement(this.opf, top)
         // make sure it's an idref; if not, try again without the ID assertion
         // mainly because Epub.js used to generate wrong ID assertions
         // https://github.com/futurepress/epub.js/issues/1236
         if ($itemref && $itemref.nodeName !== 'idref') {
             top.at(-1).id = null
-            $itemref = CFI.toElement(this.opf, top, filter)
+            $itemref = this.CFI.toElement(this.opf, top)
         }
         const idref = $itemref?.getAttribute('idref')
         const index = this.spine.findIndex(item => item.idref === idref)
-        const anchor = doc => CFI.toRange(doc, parts, filter)
+        const anchor = doc => this.CFI.toRange(doc, parts)
         return { index, anchor }
     }
 }
@@ -931,6 +932,7 @@ const getDisplayOptions = doc => {
 
 export class EPUB {
     parser = new DOMParser()
+    CFI = defaultCFI
     #loader
     #encryption
     constructor({ loadText, loadBlob, getSize, sha1 }) {
@@ -948,7 +950,8 @@ export class EPUB {
 ${doc.querySelector('parsererror').innerText}`)
         return doc
     }
-    async init() {
+    async init({ CFI } = {}) {
+        if (CFI) this.CFI = CFI
         const $container = await this.#loadXML('META-INF/container.xml')
         if (!$container) throw new Error('Failed to load container file')
 
@@ -967,6 +970,7 @@ ${doc.querySelector('parsererror').innerText}`)
 
         this.resources = new Resources({
             opf,
+            CFI: this.CFI,
             resolveHref: url => resolveURL(url, opfPath),
         })
         this.#loader = new Loader({
@@ -1042,8 +1046,8 @@ ${doc.querySelector('parsererror').innerText}`)
     getMediaOverlay() {
         return new MediaOverlay(this, this.#loadXML.bind(this))
     }
-    resolveCFI(cfi, filter) {
-        return this.resources.resolveCFI(cfi, filter)
+    resolveCFI(cfi) {
+        return this.resources.resolveCFI(cfi)
     }
     resolveHref(href) {
         const [path, hash] = href.split('#')
