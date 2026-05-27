@@ -168,6 +168,34 @@ export const makePDF = async file => {
             cache.set(i, url)
             return url
         },
+        createDocument: async () => {
+            const page = await pdf.getPage(i + 1)
+            const doc = document.implementation.createHTMLDocument()
+            const canvasDiv = doc.createElement('div')
+            canvasDiv.id = 'canvas'
+            const textLayer = doc.createElement('div')
+            textLayer.className = 'textLayer'
+            const annotationLayer = doc.createElement('div')
+            annotationLayer.className = 'annotationLayer'
+            doc.body.append(canvasDiv, textLayer, annotationLayer)
+            const viewport = page.getViewport({ scale: 1})
+            const tL = new pdfjsLib.TextLayer({
+                textContentSource: await page.streamTextContent(),
+                container: textLayer,
+                viewport,
+            })
+            await tL.render()
+            // Really crude patch to find words broken across multiple lines,
+            // and to avoid that a query matches with unrelated words on subsequent lines,
+            // e.g., avoid that 'ebook' matches with <span>entire</span><br><span>books</span>
+            textLayer.querySelectorAll('span').forEach(elem => {
+                if (elem.tagName === 'SPAN' && elem.nextElementSibling?.tagName === 'BR') {
+                    if (elem.textContent.at(-1) === '-') elem.textContent = elem.textContent.slice(0, elem.textContent.length - 1)
+                    else elem.textContent += ' '
+                }
+            })
+            return doc
+        },
         size: 1000,
     }))
     book.isExternal = uri => /^\w+:/i.test(uri)
