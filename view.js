@@ -103,10 +103,10 @@ export const makeBook = async (file, opts) => {
             book = await new EPUB(loader).init({ CFI: opts?.CFI })
         }
     }
-    // else if (await isPDF(file)) {
-    //     const { makePDF } = await import('./pdf.js')
-    //     book = await makePDF(file)
-    // }
+    else if (await isPDF(file)) {
+        const { makePDF } = await import('./pdf.js')
+        book = await makePDF(file)
+    }
     else {
         const { isMOBI, MOBI } = await import('./mobi.js')
         if (await isMOBI(file)) {
