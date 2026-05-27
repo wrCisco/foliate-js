@@ -1,6 +1,29 @@
 const createSVGElement = tag =>
     document.createElementNS('http://www.w3.org/2000/svg', tag)
 
+const visibleFunc = (el) => {
+    if (el.checkVisibility) {
+        const opts = {
+            opacityProperty: true,
+            visibilityProperty: true,
+        }
+        return () => el.checkVisibility(opts)
+    }
+    else {
+        return () => {
+            for (let node = el; node; node = node.parentElement) {
+                const styles = getComputedStyle(node)
+                if (styles.display === 'none'
+                        || styles.visibility === 'hidden'
+                        || styles.opacity === '0') {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+}
+
 export class Overlayer {
     #svg = createSVGElement('svg')
     #map = new Map()
@@ -10,6 +33,7 @@ export class Overlayer {
             width: '100%', height: '100%',
             pointerEvents: 'none',
         })
+        this.isVisible = visibleFunc(this.#svg)
     }
     get element() {
         return this.#svg
@@ -23,13 +47,13 @@ export class Overlayer {
         if (rects.length === 0 && range.startContainer?.nodeType === Node.ELEMENT_NODE) {
             rects = range.startContainer.getClientRects() ?? []
         }
-        if (rects.length === 0) {
+        if (rects.length === 0 && this.isVisible()) {
             console.warn('Overlayer: no rects to draw for range', range)
-            return
         }
         const element = draw(rects, options)
         this.#svg.append(element)
         this.#map.set(key, { range, draw, options, element, rects })
+        return element
     }
     remove(key) {
         if (!this.#map.has(key)) return
