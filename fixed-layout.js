@@ -38,19 +38,22 @@ export class FixedLayout extends HTMLElement {
     defaultViewport
     spread
     #portrait = false
-    #left
-    #right
+    #start
+    #end
     #center
     #side
     #zoom
     #maxCols
     #gen = 0
+    #sheet = new CSSStyleSheet()
     constructor() {
         super()
-
-        const sheet = new CSSStyleSheet()
-        this.#root.adoptedStyleSheets = [sheet]
-        sheet.replaceSync(`:host {
+        this.#root.adoptedStyleSheets = [this.#sheet]
+        this.#setRendererStyle()
+        this.#observer.observe(this)
+    }
+    #setRendererStyle() {
+        this.#sheet.replaceSync(`:host {
             width: 100%;
             height: 100%;
             display: flex;
@@ -58,9 +61,9 @@ export class FixedLayout extends HTMLElement {
             align-items: center;
             overflow: auto;
             scrollbar-gutter: stable both-edges;
+            direction: ltr;
+            flex-direction: ${this.rtl ? 'row-reverse' : 'row'};
         }`)
-
-        this.#observer.observe(this)
     }
     attributeChangedCallback(name, _, value) {
         switch (name) {
@@ -102,7 +105,7 @@ export class FixedLayout extends HTMLElement {
                 this.dispatchEvent(new CustomEvent('load', { detail: { doc, index } }))
                 const { width, height } = getViewport(doc, this.defaultViewport)
                 const observer = new ResizeObserver(() => requestAnimationFrame(() => {
-                    if (![this.#left, this.#right, this.#center]
+                    if (![this.#start, this.#end, this.#center]
                         .some(f => f?.observer === observer)) return
                     this.#render()
                 }))
@@ -110,7 +113,7 @@ export class FixedLayout extends HTMLElement {
                     // fonts deferred loading can change the position
                     // of text without resizing the frame
                     await doc.fonts.ready
-                    if (![this.#left, this.#right, this.#center].includes(frame) ||
+                    if (![this.#start, this.#end, this.#center].includes(frame) ||
                         frame._overlayerRequested) return false
                     observer.observe(doc.body)
                     this.dispatchEvent(new CustomEvent('create-overlayer', {
@@ -139,32 +142,32 @@ export class FixedLayout extends HTMLElement {
     }
     async #render(side = this.#side) {
         if (!side) return
-        const left = this.#left ?? {}
-        const right = this.#center ?? this.#right ?? {}
-        const target = side === 'left' ? left : right
+        const start = this.#start ?? {}
+        const end = this.#center ?? this.#end ?? {}
+        const target = side === 'start' ? start : end
         const width = this.clientWidth
         const height = this.clientHeight
         const portrait = this.#maxCols === 1
             || this.spread !== 'both' && this.spread !== 'portrait' && height > width
         this.#portrait = portrait
-        const blankWidth = left.width ?? right.width ?? 0
-        const blankHeight = left.height ?? right.height ?? 0
+        const blankWidth = start.width ?? end.width ?? 0
+        const blankHeight = start.height ?? end.height ?? 0
 
         const scale = typeof this.#zoom === 'number' && !isNaN(this.#zoom)
             ? this.#zoom
             : (this.#zoom === 'fit-width'
                 ? (portrait || this.#center
                     ? width / (target.width ?? blankWidth)
-                    : width / ((left.width ?? blankWidth) + (right.width ?? blankWidth)))
+                    : width / ((start.width ?? blankWidth) + (end.width ?? blankWidth)))
                 : (portrait || this.#center
                     ? Math.min(
                         width / (target.width ?? blankWidth),
                         height / (target.height ?? blankHeight))
                     : Math.min(
-                        width / ((left.width ?? blankWidth) + (right.width ?? blankWidth)),
+                        width / ((start.width ?? blankWidth) + (end.width ?? blankWidth)),
                         height / Math.max(
-                            left.height ?? blankHeight,
-                            right.height ?? blankHeight)))
+                            start.height ?? blankHeight,
+                            end.height ?? blankHeight)))
             ) || 1
 
         const transform = async frame => {
@@ -195,7 +198,7 @@ export class FixedLayout extends HTMLElement {
         if (this.#center) {
             await transform(this.#center)
         } else {
-            await Promise.all([transform(left), transform(right)])
+            await Promise.all([transform(start), transform(end)])
         }
     }
     #styleOverlayer(frame) {
@@ -220,10 +223,10 @@ export class FixedLayout extends HTMLElement {
             }))
     }
     async #showSpread({ left, right, center, side, gen, index }) {
-        for (const f of [this.#left, this.#right, this.#center]) f?.observer?.disconnect()
+        for (const f of [this.#start, this.#end, this.#center]) f?.observer?.disconnect()
         this.#root.replaceChildren()
-        this.#left = null
-        this.#right = null
+        this.#start = null
+        this.#end = null
         this.#center = null
         if (center) {
             const c = await this.#createFrame(center)
@@ -232,32 +235,37 @@ export class FixedLayout extends HTMLElement {
             if (gen === this.#gen) this.#side = 'center'
             await this.#renderPages(this.#center)
         } else {
-            const [l, r] = await Promise.all([this.#createFrame(left), this.#createFrame(right)])
+            const [s, e] = await Promise.all(this.rtl
+                ? [this.#createFrame(right), this.#createFrame(left)]
+                : [this.#createFrame(left), this.#createFrame(right)]
+            )
             if (index !== this.#index) return
-            this.#left = l
-            this.#right = r
+            this.#start = s
+            this.#end = e
             if (gen === this.#gen)
-                this.#side = this.#left.blank ? 'right'
-                    : this.#right.blank ? 'left' : side
-            await this.#renderPages(this.#left, this.#right)
+                this.#side = this.#start.blank ? 'end'
+                    : this.#end.blank ? 'start' : side
+            await this.#renderPages(this.#start, this.#end)
         }
     }
     async #goLeft() {
-        if (this.#center || this.#left?.blank) return
-        if (this.#portrait && this.#left?.element?.style?.display === 'none') {
+        const page = this.rtl ? this.#end : this.#start
+        if (this.#center || page?.blank) return
+        if (this.#portrait && page?.element?.style?.display === 'none') {
             const gen = ++this.#gen
-            this.#side = 'left'
-            await this.#renderPages(this.#left)
+            this.#side = this.rtl ? 'end' : 'start'
+            await this.#renderPages(page)
             if (gen === this.#gen) this.#reportLocation('page')
             return true
         }
     }
     async #goRight() {
-        if (this.#center || this.#right?.blank) return
-        if (this.#portrait && this.#right?.element?.style?.display === 'none') {
+        const page = this.rtl ? this.#start : this.#end
+        if (this.#center || page?.blank) return
+        if (this.#portrait && page?.element?.style?.display === 'none') {
             const gen = ++this.#gen
-            this.#side = 'right'
-            await this.#renderPages(this.#right)
+            this.#side = this.rtl ? 'start' : 'end'
+            await this.#renderPages(page)
             if (gen === this.#gen) this.#reportLocation('page')
             return true
         }
@@ -271,6 +279,7 @@ export class FixedLayout extends HTMLElement {
         const rtl = book.dir === 'rtl'
         const ltr = !rtl
         this.rtl = rtl
+        this.#setRendererStyle()
 
         if (rendition?.spread === 'none')
             this.#spreads = book.sections.map(section => ({ center: section }))
@@ -309,7 +318,7 @@ export class FixedLayout extends HTMLElement {
     }
     get index() {
         const spread = this.#spreads[this.#index]
-        const section = spread?.center ?? (this.#side === 'left'
+        const section = spread.center ?? ((this.#side === 'start') !== this.rtl
             ? spread.left ?? spread.right : spread.right ?? spread.left)
         return this.book.sections.indexOf(section)
     }
@@ -321,28 +330,28 @@ export class FixedLayout extends HTMLElement {
         const spreads = this.#spreads
         for (let index = 0; index < spreads.length; index++) {
             const { left, right, center } = spreads[index]
-            if (left === section) return { index, side: 'left' }
-            if (right === section) return { index, side: 'right' }
+            if (left === section) return { index, side: this.rtl ? 'end' : 'start' }
+            if (right === section) return { index, side: this.rtl ? 'start' : 'end' }
             if (center === section) return { index, side: 'center' }
         }
     }
     async goToSpread(index, side, reason) {
         if (index < 0 || index > this.#spreads.length - 1) return
         if (index === this.#index) {
-            const newSide = this.#left?.blank ? 'right'
-                : this.#right?.blank ? 'left' : side
+            const newSide = this.#start?.blank ? 'end'
+                : this.#end?.blank ? 'start' : side
             if (newSide !== this.#side) {
                 const gen = ++this.#gen
                 this.#side = newSide
-                if (this.#side === 'left' && this.#left) {
-                    await this.#renderPages(this.#left)
+                if (this.#side === 'start' && this.#start) {
+                    await this.#renderPages(this.#start)
                 }
-                else if (this.#side === 'right' && this.#right) {
-                    await this.#renderPages(this.#right)
+                else if (this.#side === 'end' && this.#end) {
+                    await this.#renderPages(this.#end)
                 }
                 if (gen === this.#gen) this.#reportLocation(reason)
             }
-            else if (this.#left || this.#right || this.#center) {
+            else if (this.#start || this.#end || this.#center) {
                 await this.#render()
             }
             return
@@ -381,11 +390,11 @@ export class FixedLayout extends HTMLElement {
     }
     async next() {
         const s = await (this.rtl ? this.#goLeft() : this.#goRight())
-        if (!s) return await this.goToSpread(this.#index + 1, this.rtl ? 'right' : 'left', 'page')
+        if (!s) return await this.goToSpread(this.#index + 1, 'start', 'page')
     }
     async prev() {
         const s = await (this.rtl ? this.#goRight() : this.#goLeft())
-        if (!s) return await this.goToSpread(this.#index - 1, this.rtl ? 'left' : 'right', 'page')
+        if (!s) return await this.goToSpread(this.#index - 1, 'end', 'page')
     }
     getContents({ onlyVisible = true } = {}) {
         const contents = []
@@ -397,9 +406,10 @@ export class FixedLayout extends HTMLElement {
                 overlayer: this.#center.overlayer,
             })
         }
-        const pages = this.rtl
-            ? [[spread?.right, this.#right], [spread?.left, this.#left]]
-            : [[spread?.left, this.#left], [spread?.right, this.#right]]
+        const pages = [
+            [this.rtl ? spread?.right : spread?.left, this.#start],
+            [this.rtl ? spread?.left : spread?.right, this.#end],
+        ]
         for (const [section, frame] of pages) {
             if (section && frame && !frame.blank &&
                     (frame.element.style.display !== 'none' || !onlyVisible)) {
@@ -413,7 +423,7 @@ export class FixedLayout extends HTMLElement {
         return contents
     }
     destroy() {
-        for (const f of [this.#left, this.#right, this.#center]) f?.observer?.disconnect()
+        for (const f of [this.#start, this.#end, this.#center]) f?.observer?.disconnect()
         this.#observer.unobserve(this)
     }
 }
