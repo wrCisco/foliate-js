@@ -154,6 +154,8 @@ export const makePDF = async file => {
         source: metadata?.get('dc:source'),
         rights: metadata?.get('dc:rights'),
     }
+    const viewerPrefs = await pdf.getViewerPreferences()
+    book.dir = viewerPrefs?.Direction === 'R2L' ? 'rtl' : 'ltr'
 
     const outline = await pdf.getOutline()
     book.toc = outline?.map(makeTOCItem)
