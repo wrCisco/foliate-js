@@ -1,5 +1,3 @@
-import * as defaultCFI from './epubcfi.js'
-
 const NS = {
     CONTAINER: 'urn:oasis:names:tc:opendocument:xmlns:container',
     XHTML: 'http://www.w3.org/1999/xhtml',
@@ -932,7 +930,7 @@ const getDisplayOptions = doc => {
 
 export class EPUB {
     parser = new DOMParser()
-    CFI = defaultCFI
+    CFI
     #loader
     #encryption
     constructor({ loadText, loadBlob, getSize, sha1 }) {
@@ -951,7 +949,7 @@ ${doc.querySelector('parsererror').innerText}`)
         return doc
     }
     async init({ CFI } = {}) {
-        if (CFI) this.CFI = CFI
+        this.CFI = CFI ?? await import('./epubcfi.js')
         const $container = await this.#loadXML('META-INF/container.xml')
         if (!$container) throw new Error('Failed to load container file')
 
