@@ -1,4 +1,3 @@
-import * as defaultCFI from './epubcfi.js'
 import { TOCProgress, SectionProgress } from './progress.js'
 import { Overlayer } from './overlayer.js'
 import { textWalker } from './text-walker.js'
@@ -223,7 +222,7 @@ export class View extends HTMLElement {
     isFixedLayout = false
     lastLocation
     history = new History()
-    CFI = defaultCFI
+    CFI
     constructor() {
         super()
         this.history.addEventListener('popstate', ({ detail }) => {
@@ -232,7 +231,7 @@ export class View extends HTMLElement {
         })
     }
     async open(book, { CFI } = {}) {
-        if (CFI) this.CFI = CFI
+        this.CFI = CFI ?? await import('./epubcfi.js')
         if (typeof book === 'string'
         || typeof book.arrayBuffer === 'function'
         || book.isDirectory) book = await makeBook(book, { CFI: this.CFI })
