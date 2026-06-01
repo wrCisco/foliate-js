@@ -15,11 +15,10 @@ export const makeComicBook = ({ entries, loadBlob, getSize }, file) => {
         urls.delete(name)
         cache.delete(name)
     }
-
     const exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.jxl', '.avif']
     const files = entries
         .map(entry => entry.filename)
-        .filter(name => exts.some(ext => name.toLowerCase().endsWith(ext)))
+        .filter(name => exts.some(ext => name.toLowerCase().endsWith(ext)) && !name.startsWith('__MACOSX/'))
         .sort(new Intl.Collator([], { numeric: true }).compare)
     if (!files.length) throw new Error('No supported image files in archive')
 
