@@ -102,6 +102,57 @@ const segmenterSearch = function* (strs, query, options = {}) {
     const normalizedQuery = querySegments.join('')
     if (!querySegments.length) return
 
+    // when ignoring punctuation, the match is extended to the punctuation marks that the
+    // query has before its first and after its last searched character, as long as the
+    // text has the same marks there (white space and formatting characters aside)
+    const graphemes = new Intl.Segmenter(locale, { granularity: 'grapheme' })
+    const isSkipped = s => !/\S/u.test(s) || !/[^\p{Format}]/u.test(s)
+    const edgeMarks = segs => {
+        const marks = []
+        for (const s of segs) {
+            if (isSkipped(s)) continue
+            if (ipRegExp.test(s)) break
+            marks.push(s)
+        }
+        return marks
+    }
+    const queryGraphemes = ignorePunctuation ? Array.from(graphemes.segment(query), x => x.segment) : []
+    // both in the order in which they are compared, going away from the match
+    const leadingMarks = edgeMarks(queryGraphemes).reverse()
+    const trailingMarks = edgeMarks(queryGraphemes.toReversed()).reverse()
+    const extendStart = (i, offset) => {
+        let start = [i, offset]
+        let k = 0
+        for (; i >= 0; i--, offset = strs[i]?.length) {
+            const segs = graphemes.segment(strs[i])
+            while (offset > 0) {
+                const { index, segment } = segs.containing(offset - 1)
+                offset = index
+                if (isSkipped(segment)) continue
+                if (segment !== leadingMarks[k]) return start
+                start = [i, index]
+                if (++k === leadingMarks.length) return start
+            }
+        }
+        return start
+    }
+    const extendEnd = (i, offset) => {
+        let end = [i, offset]
+        let k = 0
+        for (; i < strs.length; i++, offset = 0) {
+            const segs = graphemes.segment(strs[i])
+            while (offset < strs[i].length) {
+                const { index, segment } = segs.containing(offset)
+                offset = index + segment.length
+                if (isSkipped(segment)) continue
+                if (segment !== trailingMarks[k]) return end
+                end = [i, offset]
+                if (++k === trailingMarks.length) return end
+            }
+        }
+        return end
+    }
+
     const substrArr = []
     let strIndex = 0
     let segments = segmentText(strs[strIndex])
@@ -144,6 +195,8 @@ const segmenterSearch = function* (strs, query, options = {}) {
             const startIndex = firstSeg.strIndex
             const startOffset = firstSeg.index
             const range = { startIndex, startOffset, endIndex, endOffset }
+            if (leadingMarks.length) [range.startIndex, range.startOffset] = extendStart(startIndex, startOffset)
+            if (trailingMarks.length) [range.endIndex, range.endOffset] = extendEnd(endIndex, endOffset)
             yield { range, excerpt: makeExcerpt(strs, range) }
         }
         substrArr.shift()
