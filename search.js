@@ -62,9 +62,34 @@ const segmenterSearch = function* (strs, query, options = {}) {
     // (as of October 2026 only Thai does it and only for usage 'sort')
     ignorePunctuation = collator.resolvedOptions().ignorePunctuation
 
+    // in case an invalid locale has been passed to the collator
+    const locale = collator.resolvedOptions().locale
+
+    // with granularity === 'grapheme', a grapheme that the collator considers
+    // equal to several graphemes (e.g. 'ß' and 'ss') would never match, so it is
+    // split into parts, each one keeping the offset and length of the original
+    const expand = sensitivity === 'base' && granularity === 'grapheme'
+    const segmentText = function* (str) {
+        for (const { index, segment } of segmenter.segment(str)) {
+            if (expand) {
+                const norm = segment.toLocaleLowerCase(locale).toLocaleUpperCase(locale)
+                const parts = norm === segment ? []
+                    : Array.from(segmenter.segment(norm), x => x.segment)
+                if (parts.length > 1 && collator.compare(segment, norm) === 0) {
+                    for (const [i, part] of parts.entries()) yield {
+                        index, segment: part, length: segment.length,
+                        isFirst: i === 0, isLast: i === parts.length - 1,
+                    }
+                    continue
+                }
+            }
+            yield { index, segment, length: segment.length, isFirst: true, isLast: true }
+        }
+    }
+
     const ipRegExp = /[^\p{P}\p{Z}\t\n\v\f\r\u0085]/u
     const querySegments = []
-    for (const { segment } of segmenter.segment(query)) {
+    for (const { segment } of segmentText(query)) {
         if (!/[^\p{Format}]/u.test(segment)) continue
         if (ignorePunctuation && !ipRegExp.test(segment)) continue
         if (/\s/u.test(segment)) {
@@ -79,7 +104,7 @@ const segmenterSearch = function* (strs, query, options = {}) {
 
     const substrArr = []
     let strIndex = 0
-    let segments = segmenter.segment(strs[strIndex])[Symbol.iterator]()
+    let segments = segmentText(strs[strIndex])
     main: while (strIndex < strs.length) {
         while (substrArr.length < querySegments.length) {
             const { done, value } = segments.next()
@@ -88,7 +113,7 @@ const segmenterSearch = function* (strs, query, options = {}) {
                 // move on to the next string
                 strIndex++
                 if (strIndex < strs.length) {
-                    segments = segmenter.segment(strs[strIndex])[Symbol.iterator]()
+                    segments = segmentText(strs[strIndex])
                     continue
                 } else break main
             }
@@ -100,23 +125,24 @@ const segmenterSearch = function* (strs, query, options = {}) {
             // normalize whitespace
             if (/\s/u.test(segment)) {
                 if (!/\s/u.test(substrArr[substrArr.length - 1]?.segment))
-                    substrArr.push({ strIndex, index, segment: ' ' })
+                    substrArr.push({ strIndex, index, segment: ' ', length: 1, isFirst: true, isLast: true })
                 continue
             }
             value.strIndex = strIndex
             substrArr.push(value)
         }
         const substr = substrArr.map(x => x.segment).join('')
+        const firstSeg = substrArr[0]
+        const lastSeg = substrArr[substrArr.length - 1]
         // when ignoring punctuation, normalizedQuery and substr combine multiple words into one,
         // so, to match whole words only, it is necessary to compare the segments separately
-        if (ignorePunctuation && granularity === 'word'
+        if (firstSeg.isFirst && lastSeg.isLast && (ignorePunctuation && granularity === 'word'
                 ? querySegments.every((seg, i) => collator.compare(seg, substrArr[i].segment) === 0)
-                : collator.compare(normalizedQuery, substr) === 0) {
+                : collator.compare(normalizedQuery, substr) === 0)) {
             const endIndex = strIndex
-            const lastSeg = substrArr[substrArr.length - 1]
-            const endOffset = lastSeg.index + lastSeg.segment.length
-            const startIndex = substrArr[0].strIndex
-            const startOffset = substrArr[0].index
+            const endOffset = lastSeg.index + lastSeg.length
+            const startIndex = firstSeg.strIndex
+            const startOffset = firstSeg.index
             const range = { startIndex, startOffset, endIndex, endOffset }
             yield { range, excerpt: makeExcerpt(strs, range) }
         }
