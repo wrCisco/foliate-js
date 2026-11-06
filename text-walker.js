@@ -15,19 +15,20 @@ const walkDocument = (_, walker) => {
     return nodes
 }
 
-const filter = NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT
-    | NodeFilter.SHOW_CDATA_SECTION
-
-const acceptNode = node => {
-    if (node.nodeType === 1) {
-        const name = node.tagName.toLowerCase()
-        if (name === 'script' || name === 'style') return NodeFilter.FILTER_REJECT
-        return NodeFilter.FILTER_SKIP
+export const textWalkerFilters = {
+    filter: NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT | NodeFilter.SHOW_CDATA_SECTION,
+    acceptNode: node => {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            const name = node.tagName.toLowerCase()
+            if (['script', 'style'].includes(name)) return NodeFilter.FILTER_REJECT
+            return NodeFilter.FILTER_SKIP
+        }
+        return NodeFilter.FILTER_ACCEPT
     }
-    return NodeFilter.FILTER_ACCEPT
 }
 
 export const textWalker = function* (x, func, filterFunc) {
+    const { filter, acceptNode } = textWalkerFilters
     const root = x.commonAncestorContainer ?? x.body ?? x
     const walker = document.createTreeWalker(root, filter, { acceptNode: filterFunc || acceptNode })
     const walk = x.commonAncestorContainer ? walkRange : walkDocument
