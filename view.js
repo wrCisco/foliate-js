@@ -416,7 +416,7 @@ export class View extends HTMLElement {
         const list = this.#searchResults.get(index)
         if (list) for (const item of list) this.addAnnotation(item)
 
-        this.#emit('create-overlay', { index })
+        this.#emit('create-overlay', { doc, index })
         return overlayer
     }
     async showAnnotation(annotation) {
