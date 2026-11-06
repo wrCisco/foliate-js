@@ -492,10 +492,11 @@ export class View extends HTMLElement {
         return (this.#sectionProgress?.sectionFractions ?? [])
             .map(x => x + Number.EPSILON)
     }
-    getProgressOf(index, range) {
+    getProgressOf(index, range, fraction = 0, size = 0) {
         const tocItem = this.#tocProgress?.getProgress(index, range)
         const pageItem = this.#pageProgress?.getProgress(index, range)
-        return { tocItem, pageItem }
+        const progress = this.#sectionProgress?.getProgress(index, fraction, size)
+        return { tocItem, pageItem, progress }
     }
     async getTOCItemOf(target) {
         try {
