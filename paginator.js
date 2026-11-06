@@ -791,6 +791,53 @@ export class Paginator extends HTMLElement {
     get pages() {
         return Math.round(this.viewSize / this.size)
     }
+    getRangeFromFraction(anchor, currentPage = false) {
+        let offset
+        if (this.scrolled) {
+            offset = anchor * this.viewSize
+            if (isNaN(offset)) return
+        }
+        else {
+            const { pages } = this
+            const textPages = pages - 2
+            if (textPages < 0) return
+            // currentPage should be true if anchor marks the end of a page
+            // (as in the fraction reported by view.js's relocate event).
+            // If currentPage is false, the resulting page is the same
+            // that scrollToAnchor(anchor) would show.
+            const newPage = currentPage
+                ? Math.min(textPages - 1, Math.max(0, Math.ceil(anchor * textPages - 1e-9) - 1)) + 1
+                : Math.round(anchor * (textPages - 1)) + 1
+            offset = this.size * (this.#rtl ? -newPage : newPage)
+        }
+        const start = Math.abs(offset)
+        const end = start + this.size
+        if (this.scrolled) {
+            return getVisibleRange(
+                this.#view.document, start + this.#margin,
+                end - this.#margin, this.#getRectMapper()
+            )
+        }
+        const size = this.#rtl ? -this.size : this.size
+        return getVisibleRange(
+            this.#view.document, start - size, end - size, this.#getRectMapper()
+        )
+    }
+    getFractionFromRange(range) {
+        const rects = uncollapse(range.cloneRange())?.getClientRects?.()
+        if (!rects) return
+        const rect = Array.from(rects).find(r => r.width > 0 && r.height > 0) || rects[0]
+        if (!rect) return
+        const { left } = this.#getRectMapper()(rect)
+        if (this.scrolled) {
+            const offset = Math.min(left - this.#margin, this.viewSize - this.size)
+            return { fraction: offset / this.viewSize }
+        }
+        const { pages } = this
+        if (!(pages > 2)) return
+        const page = Math.floor(left / this.size) + (this.#rtl ? -1 : 1)
+        return { fraction: (page - 1) / (pages - 2), size: 1 / (pages - 2) }
+    }
     scrollBy(dx, dy) {
         const delta = this.#vertical ? dy : dx
         const element = this.#container
@@ -987,13 +1034,14 @@ export class Paginator extends HTMLElement {
             }
             const beforeRender = this.#beforeRender.bind(this)
             await view.load(src, afterLoad, beforeRender)
+            // in case the view is replaced by a newer #display (or destroyed) while loading
+            if (this.#view !== view) return
             this.dispatchEvent(new CustomEvent('create-overlayer', {
                 detail: {
                     doc: view.document, index,
                     attach: overlayer => view.overlayer = overlayer,
                 },
             }))
-            this.#view = view
         }
         await this.scrollToAnchor((typeof anchor === 'function'
             ? anchor(this.#view.document) : anchor) ?? 0, select)
