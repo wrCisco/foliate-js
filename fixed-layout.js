@@ -46,6 +46,7 @@ export class FixedLayout extends HTMLElement {
     #maxCols
     #gen = 0
     #sheet = new CSSStyleSheet()
+    #oldFrames = []
     constructor() {
         super()
         this.#root.adoptedStyleSheets = [this.#sheet]
@@ -100,7 +101,7 @@ export class FixedLayout extends HTMLElement {
         this.#root.append(element)
         if (!src) return { blank: true, element, iframe, ensureReady: async () => {} }
         return new Promise(resolve => {
-            iframe.addEventListener('load', () => {
+            iframe.addEventListener('load', async () => {
                 const doc = iframe.contentDocument
                 this.dispatchEvent(new CustomEvent('load', { detail: { doc, index } }))
                 const { width, height } = getViewport(doc, this.defaultViewport)
@@ -128,6 +129,12 @@ export class FixedLayout extends HTMLElement {
                     }))
                     return true
                 }
+                // Firefox decodes images when they're first painted, so a page
+                // with images shown as soon as it's loaded is blank for a few frames
+                // causing a flash on screen: decode them now, while the frame is hidden
+                // (only complete images: a lazy one may never load)
+                await Promise.all(Array.from(doc.images,
+                    img => img.complete ? img.decode().catch(() => {}) : null))
                 resolve({
                     element, iframe,
                     overlayer: null,
@@ -141,7 +148,9 @@ export class FixedLayout extends HTMLElement {
         })
     }
     async #render(side = this.#side) {
-        if (!side) return
+        const current = [this.#start, this.#end, this.#center]
+        if (!side || current.every(f => !f)) return
+        const isCurrent = () => [this.#start, this.#end, this.#center].every((f, i) => f === current[i])
         const start = this.#start ?? {}
         const end = this.#center ?? this.#end ?? {}
         const target = side === 'start' ? start : end
@@ -170,10 +179,14 @@ export class FixedLayout extends HTMLElement {
                             end.height ?? blankHeight)))
             ) || 1
 
-        const transform = async frame => {
+        const scalePage = async frame => {
+            let { iframe, onZoom } = frame
+            if (!iframe) return
+            if (onZoom) return onZoom({ doc: iframe.contentDocument, scale })
+        }
+        const transform = frame => {
             let { element, iframe, overlayer, width, height, blank, onZoom } = frame
             if (!iframe) return
-            if (onZoom) await onZoom({ doc: frame.iframe.contentDocument, scale })
             const iframeScale = onZoom ? scale : 1
             Object.assign(iframe.style, {
                 width: `${width * iframeScale}px`,
@@ -196,10 +209,18 @@ export class FixedLayout extends HTMLElement {
             if (overlayer) this.#styleOverlayer(frame)
         }
         if (this.#center) {
-            await transform(this.#center)
+            const center = this.#center
+            if (center.onZoom) await scalePage(center)
+            if (!isCurrent()) return
+            transform(center)
         } else {
-            await Promise.all([transform(start), transform(end)])
+            if (start.onZoom || end.onZoom) await Promise.all([scalePage(start), scalePage(end)])
+            if (!isCurrent()) return
+            transform(start)
+            transform(end)
         }
+        this.#oldFrames.forEach(f => f?.element.remove())
+        this.#oldFrames.length = 0
         const frames = this.#center ? [this.#center] : [start, end]
         await Promise.all(
             frames.map(async f => {
@@ -224,13 +245,18 @@ export class FixedLayout extends HTMLElement {
     }
     async #showSpread({ left, right, center, side, gen, index }) {
         for (const f of [this.#start, this.#end, this.#center]) f?.observer?.disconnect()
-        this.#root.replaceChildren()
+        if (this.#start) this.#oldFrames.push(this.#start)
+        if (this.#end) this.#oldFrames.push(this.#end)
+        if (this.#center) this.#oldFrames.push(this.#center)
         this.#start = null
         this.#end = null
         this.#center = null
         if (center) {
             const c = await this.#createFrame(center)
-            if (index !== this.#index) return
+            if (index !== this.#index) {
+                c.element.remove()
+                return
+            }
             this.#center = c
             if (gen === this.#gen) this.#side = 'center'
             await this.#render()
@@ -239,7 +265,11 @@ export class FixedLayout extends HTMLElement {
                 ? [this.#createFrame(right), this.#createFrame(left)]
                 : [this.#createFrame(left), this.#createFrame(right)]
             )
-            if (index !== this.#index) return
+            if (index !== this.#index) {
+                s.element.remove()
+                e.element.remove()
+                return
+            }
             this.#start = s
             this.#end = e
             if (gen === this.#gen)
