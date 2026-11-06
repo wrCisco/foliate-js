@@ -110,11 +110,12 @@ export class FixedLayout extends HTMLElement {
                     this.#render()
                 }))
                 const ensureReady = async frame => {
+                    if (frame._overlayerRequested) return false
+                    frame._overlayerRequested = true
                     // fonts deferred loading can change the position
                     // of text without resizing the frame
                     await doc.fonts.ready
-                    if (![this.#start, this.#end, this.#center].includes(frame) ||
-                        frame._overlayerRequested) return false
+                    if (![this.#start, this.#end, this.#center].includes(frame)) return false
                     observer.observe(doc.body)
                     this.dispatchEvent(new CustomEvent('create-overlayer', {
                         detail: {
@@ -125,7 +126,6 @@ export class FixedLayout extends HTMLElement {
                             },
                         },
                     }))
-                    frame._overlayerRequested = true
                     return true
                 }
                 resolve({
@@ -200,6 +200,13 @@ export class FixedLayout extends HTMLElement {
         } else {
             await Promise.all([transform(start), transform(end)])
         }
+        const frames = this.#center ? [this.#center] : [start, end]
+        await Promise.all(
+            frames.map(async f => {
+                if (!f.ensureReady || f.element.style.display === 'none') return
+                if (await f.ensureReady(f)) this.#styleOverlayer(f)
+            })
+        )
     }
     #styleOverlayer(frame) {
         const { overlayer, iframe, element } = frame
@@ -215,13 +222,6 @@ export class FixedLayout extends HTMLElement {
         })
         if (![element.style.display, el.style.display].includes('none')) overlayer.redraw()
     }
-    async #renderPages(...pages) {
-        await this.#render()
-        await Promise.all(
-            pages.map(async p => {
-                if (await p.ensureReady(p)) this.#styleOverlayer(p)
-            }))
-    }
     async #showSpread({ left, right, center, side, gen, index }) {
         for (const f of [this.#start, this.#end, this.#center]) f?.observer?.disconnect()
         this.#root.replaceChildren()
@@ -233,7 +233,7 @@ export class FixedLayout extends HTMLElement {
             if (index !== this.#index) return
             this.#center = c
             if (gen === this.#gen) this.#side = 'center'
-            await this.#renderPages(this.#center)
+            await this.#render()
         } else {
             const [s, e] = await Promise.all(this.rtl
                 ? [this.#createFrame(right), this.#createFrame(left)]
@@ -245,7 +245,7 @@ export class FixedLayout extends HTMLElement {
             if (gen === this.#gen)
                 this.#side = this.#start.blank ? 'end'
                     : this.#end.blank ? 'start' : side
-            await this.#renderPages(this.#start, this.#end)
+            await this.#render()
         }
     }
     async #goLeft() {
@@ -254,7 +254,7 @@ export class FixedLayout extends HTMLElement {
         if (this.#portrait && page?.element?.style?.display === 'none') {
             const gen = ++this.#gen
             this.#side = this.rtl ? 'end' : 'start'
-            await this.#renderPages(page)
+            await this.#render()
             if (gen === this.#gen) this.#reportLocation('page')
             return true
         }
@@ -265,7 +265,7 @@ export class FixedLayout extends HTMLElement {
         if (this.#portrait && page?.element?.style?.display === 'none') {
             const gen = ++this.#gen
             this.#side = this.rtl ? 'start' : 'end'
-            await this.#renderPages(page)
+            await this.#render()
             if (gen === this.#gen) this.#reportLocation('page')
             return true
         }
@@ -354,11 +354,8 @@ export class FixedLayout extends HTMLElement {
             if (newSide !== this.#side) {
                 const gen = ++this.#gen
                 this.#side = newSide
-                if (this.#side === 'start' && this.#start) {
-                    await this.#renderPages(this.#start)
-                }
-                else if (this.#side === 'end' && this.#end) {
-                    await this.#renderPages(this.#end)
+                if (this.#side === 'start' && this.#start || this.#side === 'end' && this.#end) {
+                    await this.#render()
                 }
                 if (gen === this.#gen) this.#reportLocation(reason)
             }
