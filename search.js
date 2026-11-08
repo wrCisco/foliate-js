@@ -212,23 +212,30 @@ export const search = (strs, query, options) => {
 }
 
 export const searchMatcher = (textWalker, opts) => {
-    const { defaultLocale, matchCase, matchDiacritics, matchWholeWords, ignorePunctuation, acceptNode } = opts
     return function* (doc, query) {
         const iter = textWalker(doc, function* (strs, makeRange) {
-            for (const result of search(strs, query, {
-                locales: doc.body.lang || doc.documentElement.lang || defaultLocale || 'en',
-                granularity: matchWholeWords ? 'word' : 'grapheme',
-                sensitivity: matchDiacritics && matchCase ? 'variant'
-                : matchDiacritics && !matchCase ? 'accent'
-                : !matchDiacritics && matchCase ? 'case'
-                : 'base',
-                ignorePunctuation,
-            })) {
+            for (const result of search(strs, query, searchOptions(doc, opts))) {
                 const { startIndex, startOffset, endIndex, endOffset } = result.range
                 result.range = makeRange(startIndex, startOffset, endIndex, endOffset)
                 yield result
             }
-        }, acceptNode)
+        }, opts.acceptNode)
         for (const result of iter) yield result
+    }
+}
+
+export const searchOptions = (doc, opts) => {
+    const { defaultLocale, matchCase, matchDiacritics, matchWholeWords, ignorePunctuation } = opts
+    return {
+        locales: doc.body.lang || doc.documentElement.lang || defaultLocale || 'en',
+        granularity: matchWholeWords ? 'word' : 'grapheme',
+        sensitivity: matchDiacritics && matchCase
+            ? 'variant'
+            : matchDiacritics && !matchCase
+                ? 'accent'
+                : !matchDiacritics && matchCase
+                    ? 'case'
+                    : 'base',
+        ignorePunctuation,
     }
 }

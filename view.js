@@ -217,6 +217,8 @@ export class View extends HTMLElement {
     #searchResults = new Map()
     #searchDraw
     #searchDrawOptions
+    #searchCounter = 0
+    #walkCache = new Map()
     #cursorAutohider = new CursorAutohider(this, () =>
         this.hasAttribute('autohide-cursor'))
     isFixedLayout = false
@@ -306,6 +308,7 @@ export class View extends HTMLElement {
         this.history.clear()
         this.tts = null
         this.mediaOverlay = null
+        this.#walkCache.clear()
     }
     goToTextStart() {
         return this.goTo(this.book.landmarks
@@ -524,8 +527,63 @@ export class View extends HTMLElement {
     goRight() {
         return this.book.dir === 'rtl' ? this.prev() : this.next()
     }
+    async #walk(index) {
+        let w = this.#walkCache.get(index)
+        if (!w) {
+            w = { index, strs: [] }
+            const doc = await this.book.sections[index].createDocument?.()
+            if (doc) textWalker(doc, function* (strs, makeRange) {
+                Object.assign(w, { doc, strs, makeRange })
+            }).next()
+            this.#walkCache.set(index, w)
+            if (this.#walkCache.size > 3) this.#walkCache.delete(this.#walkCache.keys().next().value)
+        }
+        return w
+    }
+    async * #searchSectionFXL(query, opts, index) {
+        const own = await this.#walk(index)
+        if (!own.strs.length) return
+        const strs = [...own.strs]
+        const segs = [{ w: own, from: 0, to: strs.length }]
+        // borrow the beginning of the next pages, passing over blank ones (max 3 pages)
+        let need = 2 * query.length + 50 // room to finish a match
+        for (let i = index + 1; need > 0 && i < this.book.sections.length && i <= index + 3; i++) {
+            const w = await this.#walk(i)
+            let k = 0
+            while (k < w.strs.length && need > 0) need -= w.strs[k++].trim().length
+            // whitespace-only nodes around the page break are blanked in the copy (indices don't change)
+            const last = strs.findLastIndex(s => s.trim())
+            strs.fill('', last + 1)
+            strs.push(strs[last]?.trimEnd().endsWith('-') ? '' : ' ')  // page break
+            const head = w.strs.slice(0, k)
+            const first = head.findIndex(s => s.trim())
+            head.fill('', 0, first < 0 ? head.length : first)
+            segs.push({ w, from: strs.length, to: strs.length + k })
+            strs.push(...head)
+        }
+        const { search, searchOptions } = await import('./search.js')
+        for (const { range, excerpt } of search(strs, query, searchOptions(own.doc, opts))) {
+            if (range.startIndex >= segs[0].to) break  // start on a later page: that page owns it
+            const parts = this.#splitMatch(range, segs)
+            yield { cfi: parts[0].cfi, parts, excerpt }
+        }
+    }
+    #splitMatch({ startIndex, startOffset, endIndex, endOffset }, segs) {
+        const parts = []
+        for (const { w, from, to } of segs) {
+            if (from === to || endIndex < from || startIndex >= to) continue
+            const [si, so] = startIndex >= from ? [startIndex - from, startOffset] : [0, 0]
+            const [ei, eo] = endIndex < to // also catches simpleSearch's "offset 0 of the next string"
+                ? [endIndex - from, endOffset]
+                : [to - from - 1, w.strs[to - from - 1].length]
+            if (parts.length && !w.strs.slice(si, ei + 1).some(s => s.trim())) continue // blank page
+            parts.push({ index: w.index, cfi: this.getCFI(w.index, w.makeRange(si, so, ei, eo)) })
+        }
+        return parts
+    }
     async * #searchSection(matcher, query, index) {
-        const doc = await this.book.sections[index].createDocument()
+        const doc = await this.book.sections[index].createDocument?.()
+        if (!doc) return
         for (const { range, excerpt } of matcher(doc, query))
             yield { cfi: this.getCFI(index, range), excerpt }
     }
@@ -542,20 +600,23 @@ export class View extends HTMLElement {
         }
     }
     async * search(opts) {
+        const counter = this.#searchCounter
         this.#searchDraw = opts.draw ?? Overlayer.outline
         this.#searchDrawOptions = opts.drawOptions
         const { searchMatcher } = await import('./search.js')
         const { query, index } = opts
-        const matcher = searchMatcher(textWalker,
-            { defaultLocale: this.language, ...opts })
-        const iter = index != null
-            ? this.#searchSection(matcher, query, index)
-            : this.#searchBook(matcher, query)
+        opts = { defaultLocale: this.language.canonical, ...opts }
+        const matcher = searchMatcher(textWalker, opts)
+        const iter = index == null
+            ? this.#searchBook(matcher, query)
+            : this.isFixedLayout
+                ? this.#searchSectionFXL(query, opts, index)
+                : this.#searchSection(matcher, query, index)
 
-        const list = []
-        this.#searchResults.set(index, list)
+        if (!this.#searchResults.has(index)) this.#searchResults.set(index, [])
 
         for await (const result of iter) {
+            if (counter !== this.#searchCounter) return
             if (result.subitems){
                 const list = result.subitems
                     .map(({ cfi }) => ({ value: SEARCH_PREFIX + cfi }))
@@ -568,9 +629,12 @@ export class View extends HTMLElement {
             }
             else {
                 if (result.cfi) {
-                    const item = { value: SEARCH_PREFIX + result.cfi }
-                    list.push(item)
-                    this.addAnnotation(item)
+                    for (const { index: i, cfi } of result.parts ?? [{ index, cfi: result.cfi }]) {
+                        const item = { value: SEARCH_PREFIX + cfi }
+                        if (!this.#searchResults.has(i)) this.#searchResults.set(i, [])
+                        this.#searchResults.get(i).push(item)
+                        this.addAnnotation(item)
+                    }
                 }
                 yield result
             }
@@ -578,9 +642,11 @@ export class View extends HTMLElement {
         yield 'done'
     }
     clearSearch() {
+        this.#searchCounter++
         for (const list of this.#searchResults.values())
             for (const item of list) this.deleteAnnotation(item)
         this.#searchResults.clear()
+        this.#walkCache.clear()
     }
     getCurrentContents() {
         const contents = this.renderer.getContents()
