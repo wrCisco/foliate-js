@@ -107,6 +107,15 @@ const renderPage = async (page, getImageBlob) => {
           --scale-round-x: 1px;
           --scale-round-y: 1px;
         }
+        [data-main-rotation="90"] {
+          transform: rotate(90deg) translateY(-100%);
+        }
+        [data-main-rotation="180"] {
+          transform: rotate(180deg) translate(-100%, -100%);
+        }
+        [data-main-rotation="270"] {
+          transform: rotate(270deg) translateX(-100%);
+        }
         ${textLayerBuilderCSS}
         ${annotationLayerBuilderCSS}
         </style>
