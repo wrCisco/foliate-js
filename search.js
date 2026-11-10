@@ -227,7 +227,7 @@ export const searchMatcher = (textWalker, opts) => {
 export const searchOptions = (doc, opts) => {
     const { defaultLocale, matchCase, matchDiacritics, matchWholeWords, ignorePunctuation } = opts
     return {
-        locales: doc.body.lang || doc.documentElement.lang || defaultLocale || 'en',
+        locales: doc.body?.lang || doc.documentElement?.lang || defaultLocale || 'en',
         granularity: matchWholeWords ? 'word' : 'grapheme',
         sensitivity: matchDiacritics && matchCase
             ? 'variant'
