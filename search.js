@@ -239,3 +239,63 @@ export const searchOptions = (doc, opts) => {
         ignorePunctuation,
     }
 }
+
+export const crossSectionText = async (index, sections, walker, cache, need, cacheSize) => {
+    const own = await cachedWalk(index, sections, walker, cache, cacheSize)
+    if (!own.strs.length) return
+    const strs = [...own.strs]
+    const segs = [{ w: own, from: 0, to: strs.length }]
+    // borrow the beginning of the next pages, passing over blank ones (max 3 pages)
+    for (let i = index + 1; need > 0 && i < sections.length && i <= index + 3; i++) {
+        const w = await cachedWalk(i, sections, walker, cache, cacheSize)
+        let k = 0
+        while (k < w.strs.length && need > 0) need -= w.strs[k++].trim().length
+        // whitespace-only nodes around the page break are blanked in the copy (indices don't change)
+        const last = strs.findLastIndex(s => s.trim())
+        strs.fill('', last + 1)
+        strs.push(strs[last]?.trimEnd().endsWith('-') ? '' : ' ')  // page break
+        const head = w.strs.slice(0, k)
+        const first = head.findIndex(s => s.trim())
+        head.fill('', 0, first < 0 ? head.length : first)
+        segs.push({ w, from: strs.length, to: strs.length + k })
+        strs.push(...head)
+    }
+    return { doc: own.doc, strs, segs, split: range => splitMatch(range, segs) }
+}
+
+export const searchCrossSections = async function* (query, opts, index, sections, walker, cache) {
+    const t = await crossSectionText(index, sections, walker, cache, 2 * query.length + 50, 3)
+    if (!t) return
+    for (const { range, excerpt } of search(t.strs, query, searchOptions(t.doc, opts))) {
+        if (range.startIndex >= t.segs[0].to) break  // start on a later page: that page owns it
+        yield { parts: t.split(range), excerpt }
+    }
+}
+
+const cachedWalk = async (index, sections, walker, cache, cacheSize) => {
+    let w = cache.get(index)
+    if (!w) {
+        w = { index, strs: [] }
+        const doc = await sections[index].createDocument?.()
+        if (doc) walker(doc, function* (strs, makeRange) {
+            Object.assign(w, { doc, strs, makeRange })
+        }).next()
+        cache.set(index, w)
+        if (cache.size > cacheSize) cache.delete(cache.keys().next().value)
+    }
+    return w
+}
+
+const splitMatch = ({ startIndex, startOffset, endIndex, endOffset }, segs) => {
+    const parts = []
+    for (const { w, from, to } of segs) {
+        if (from === to || endIndex < from || startIndex >= to) continue
+        const [si, so] = startIndex >= from ? [startIndex - from, startOffset] : [0, 0]
+        const [ei, eo] = endIndex < to // also catches simpleSearch's "offset 0 of the next string"
+            ? [endIndex - from, endOffset]
+            : [to - from - 1, w.strs[to - from - 1].length]
+        if (parts.length && !w.strs.slice(si, ei + 1).some(s => s.trim())) continue // blank page
+        parts.push({ index: w.index, range: w.makeRange(si, so, ei, eo) })
+    }
+    return parts
+}
