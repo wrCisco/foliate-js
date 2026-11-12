@@ -34,11 +34,14 @@ const render = async (page, doc, zoom) => {
         const container = doc.querySelector('.textLayer')
         container.replaceChildren()
         const textLayer = new pdfjsLib.TextLayer({
-            textContentSource: await page.streamTextContent(),
+            textContentSource: await page.streamTextContent({ includeMarkedContent: true }),
             container, viewport,
         })
         await textLayer.render()
         doc._textLayer = textLayer
+        for (const el of container.querySelectorAll('.markedContent[aria-hidden="true"]')) {
+            el.setAttribute('data-foliate-artifact', '')
+        }
 
         // fix text selection
         // https://github.com/mozilla/pdf.js/blob/642b9a5ae67ef642b9a8808fd9efd447e8c350e2/web/text_layer_builder.js#L105-L107
@@ -191,24 +194,63 @@ export const makePDF = async file => {
             doc.body.append(canvasDiv, textLayer, annotationLayer)
             const viewport = page.getViewport({ scale: 1})
             const tL = new pdfjsLib.TextLayer({
-                textContentSource: await page.streamTextContent(),
+                textContentSource: await page.streamTextContent({ includeMarkedContent: true }),
                 container: textLayer,
                 viewport,
             })
             await tL.render()
-            // Really crude patch to find words broken across multiple lines,
-            // and to avoid that a query matches with unrelated words on subsequent lines,
-            // e.g., avoid that 'ebook' matches with <span>entire</span><br><span>books</span>
-            textLayer.querySelectorAll('span').forEach(elem => {
-                if (elem.tagName === 'SPAN' && elem.nextElementSibling?.tagName === 'BR') {
-                    if (elem.textContent.at(-1) === '-') elem.textContent = elem.textContent.slice(0, elem.textContent.length - 1)
-                    else elem.textContent += ' '
+            for (const el of textLayer.querySelectorAll('.markedContent[aria-hidden="true"]')) {
+                el.setAttribute('data-foliate-artifact', '')
+            }
+
+            // Patch to find broken words across multiple lines, and to avoid
+            // that a query matches unrelated words on subsequent lines,
+            // e.g. 'ebook' with <span>entire</span><br><span>books</span>
+            const walker = doc.createTreeWalker(textLayer, NodeFilter.SHOW_ELEMENT, node => {
+                if (node.getAttribute('aria-hidden') === 'true') {
+                    return NodeFilter.FILTER_REJECT
                 }
+                if (node.classList.contains('markedContent')) {
+                    return NodeFilter.FILTER_SKIP
+                }
+                if (node.getAttribute('role') === 'presentation') {
+                    return NodeFilter.FILTER_ACCEPT
+                }
+                return NodeFilter.FILTER_SKIP
             })
+            const { joinLines } = await import('./search.js')
+            let prev
+            while (walker.nextNode()) {
+                const current = walker.currentNode
+                if (current.tagName.toLowerCase() === 'br' && prev?.tagName.toLowerCase() === 'span') {
+                    if (prev.childNodes.length !== 1 || prev.firstChild.nodeType !== Node.TEXT_NODE) {
+                        continue
+                    }
+                    let next
+                    while (next = walker.nextNode()) {
+                        if (next.textContent) {
+                            const [text, sep] = joinLines(prev.textContent, next.textContent)
+                            prev.textContent = text + sep
+                            break
+                        }
+                    }
+                    walker.currentNode = current
+                }
+                if (current.textContent) {
+                    prev = current
+                }
+            }
+            // textLayer.querySelectorAll('span:not(.markedContent)').forEach(elem => {
+            //     if (elem.tagName === 'SPAN' && elem.nextElementSibling?.tagName === 'BR') {
+            //         if (elem.textContent.at(-1) === '-') elem.textContent = elem.textContent.slice(0, elem.textContent.length - 1)
+            //         else elem.textContent += ' '
+            //     }
+            // })
             return doc
         },
         size: 1000,
     }))
+    book.getTextLayer = doc => doc.getElementsByClassName('textLayer')?.[0]
     book.isExternal = uri => /^\w+:/i.test(uri)
     book.resolveHref = async href => {
         const parsed = JSON.parse(href)

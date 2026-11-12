@@ -240,6 +240,33 @@ export const searchOptions = (doc, opts) => {
     }
 }
 
+// hyphens that can split a word at the end of a line
+const hyphens = String.raw`\-\u00AD\u058A\u1400\u2010\u2011\u2E17\uFE63\uFF0D`
+// a hyphen after a letter, at the end of the line
+const wordSplit = new RegExp(String.raw`(\p{L}\p{M}*)[${hyphens}]$`, 'u')
+// a hyphen or a dash attached to the previous character, at the end of the line
+const attachedDash = new RegExp(String.raw`\S[${hyphens}\u2012-\u2015]$`, 'u')
+const startsWithLetter = /^\p{L}/u
+// scripts written without spaces between words
+// (use a regex alternation instead of a character set: Firefox 157 and Chromium 156
+// don't match a character class with code points outside the Basic Multilingual Plane
+// right before $, e.g. /[\p{scx=Han}]$/u and '𠀀')
+const noSpace = String.raw`\p{scx=Han}|\p{scx=Hiragana}|\p{scx=Katakana}|\p{scx=Thai}|\p{scx=Lao}|\p{scx=Khmer}|\p{scx=Myanmar}`
+const endsNoSpace = new RegExp(`(?:${noSpace})$`, 'u')
+const startsNoSpace = new RegExp(`^(?:${noSpace})`, 'u')
+// joins the text before and after a line (or page) break: returns the text
+// before, without a hyphen that splits a word, and the separator to add
+export const joinLines = (before, after) => {
+    // white space at the edges is part of the text, and the lines are already separated
+    if (/\s$/u.test(before) || /^\s/u.test(after)) return [before, '']
+    // between letters, a hyphen splits a word
+    if (wordSplit.test(before) && startsWithLetter.test(after)) return [before.replace(wordSplit, '$1'), '']
+    // otherwise it's part of the text, like a dash with no space before it (10-20, COVID-19, 10–20)
+    if (attachedDash.test(before)) return [before, '']
+    if (endsNoSpace.test(before) || startsNoSpace.test(after)) return [before, '']
+    return [before, ' ']
+}
+
 export const crossSectionText = async (index, sections, walker, cache, need, cacheSize) => {
     const own = await cachedWalk(index, sections, walker, cache, cacheSize)
     if (!own.strs.length) return
@@ -253,10 +280,12 @@ export const crossSectionText = async (index, sections, walker, cache, need, cac
         // whitespace-only nodes around the page break are blanked in the copy (indices don't change)
         const last = strs.findLastIndex(s => s.trim())
         strs.fill('', last + 1)
-        strs.push(strs[last]?.trimEnd().endsWith('-') ? '' : ' ')  // page break
         const head = w.strs.slice(0, k)
         const first = head.findIndex(s => s.trim())
         head.fill('', 0, first < 0 ? head.length : first)
+        let sep = ' '  // page break
+        if (last >= 0 && first >= 0) [strs[last], sep] = joinLines(strs[last], head[first])
+        strs.push(sep)
         segs.push({ w, from: strs.length, to: strs.length + k })
         strs.push(...head)
     }

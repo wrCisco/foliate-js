@@ -15,12 +15,16 @@ const walkDocument = (_, walker) => {
     return nodes
 }
 
+export const pdfArtifactSelector = '.markedContent[data-foliate-artifact]'
+
 export const textWalkerFilters = {
     filter: NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT | NodeFilter.SHOW_CDATA_SECTION,
     acceptNode: node => {
         if (node.nodeType === Node.ELEMENT_NODE) {
             const name = node.tagName.toLowerCase()
-            if (['script', 'style'].includes(name)) return NodeFilter.FILTER_REJECT
+            if (['script', 'style'].includes(name) || node.matches(pdfArtifactSelector)) {
+                return NodeFilter.FILTER_REJECT
+            }
             return NodeFilter.FILTER_SKIP
         }
         return NodeFilter.FILTER_ACCEPT
