@@ -31,13 +31,13 @@ export const textWalkerFilters = {
     }
 }
 
-export const textWalker = function* (x, func, filterFunc) {
+export const textWalker = function* (x, func, filterFunc, buildStrs) {
     const { filter, acceptNode } = textWalkerFilters
     const root = x.commonAncestorContainer ?? x.body ?? x
     const walker = document.createTreeWalker(root, filter, { acceptNode: filterFunc || acceptNode })
     const walk = x.commonAncestorContainer ? walkRange : walkDocument
     const nodes = walk(x, walker)
-    const strs = nodes.map(node => node.nodeValue ?? '')
+    const strs = buildStrs ? buildStrs(nodes, root) : nodes.map(node => node.nodeValue ?? '')
     const makeRange = (startIndex, startOffset, endIndex, endOffset) => {
         const range = document.createRange()
         range.setStart(nodes[startIndex], startOffset)
