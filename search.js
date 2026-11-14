@@ -20,42 +20,114 @@ const makeExcerpt = (strs, { startIndex, startOffset, endIndex, endOffset }) => 
     return { pre, match, post }
 }
 
-const simpleSearch = function* (strs, query, options = {}) {
-    const { locales = 'en', sensitivity } = options
-    const matchCase = sensitivity === 'variant'
-    const haystack = strs.join('')
-    const lowerHaystack = matchCase ? haystack : haystack.toLocaleLowerCase(locales)
-    const needle = matchCase ? query : query.toLocaleLowerCase(locales)
-    const needleLength = needle.length
-    let index = -1
-    let strIndex = -1
+// characters that are not punctuation or white space
+const ipRegExp = /[^\p{P}\p{Z}\t\n\v\f\r\u0085]/u
+
+// the strings are searched as a single text, so that graphemes and words can span
+// several of them (e.g. <i>charac</i>teristically); start() and end() give back
+// the positions in the strings of the start and of the end of a match
+const locateInStrings = strs => {
+    const starts = []
     let sum = 0
-    do {
-        index = lowerHaystack.indexOf(needle, index + 1)
-        if (index > -1) {
-            while (sum <= index) sum += strs[++strIndex].length
-            const startIndex = strIndex
-            const startOffset = index - (sum - strs[strIndex].length)
-            const end = index + needleLength
-            while (sum < end) sum += strs[++strIndex].length
-            const endIndex = strIndex
-            const endOffset = end - (sum - strs[strIndex].length)
-            const range = { startIndex, startOffset, endIndex, endOffset }
-            yield { range, excerpt: makeExcerpt(strs, range) }
+    for (const str of strs) {
+        starts.push(sum)
+        sum += str.length
+    }
+    // the index of the string with the character at offset
+    const indexAt = offset => {
+        let lo = 0
+        let hi = starts.length - 1
+        while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1
+            if (starts[mid] <= offset) lo = mid
+            else hi = mid - 1
         }
-    } while (index > -1)
+        return lo
+    }
+    return {
+        text: strs.join(''),
+        starts,
+        start: offset => {
+            const i = indexAt(offset)
+            return [i, offset - starts[i]]
+        },
+        end: offset => {
+            const i = indexAt(offset - 1)
+            return [i, offset - starts[i]]
+        },
+    }
+}
+
+// used only without Intl.Segmenter: the text and the query are normalized one character
+// at a time (with its combining marks) according to the sensitivity, approximating
+// the collator, and each character of the normalized text keeps where it comes from
+const simpleSearch = function* (strs, query, options = {}) {
+    const { locales = 'en', sensitivity = 'base', ignorePunctuation } = options
+    let locale = 'en'
+    try {
+        locale = new Intl.Collator(locales).resolvedOptions().locale
+    } catch (e) {
+        console.warn(e)
+    }
+    const ignoreCase = sensitivity === 'base' || sensitivity === 'accent'
+    const ignoreMarks = sensitivity === 'base' || sensitivity === 'case'
+    const normalize = str => {
+        str = str.replace(/\p{Format}/gu, '')
+        if (ignorePunctuation && !ipRegExp.test(str)) return ''
+        if (/\s/u.test(str)) return ' '
+        // only with sensitivity 'variant' the compatibility variants
+        // (ligatures, full width forms, superscripts...) are different
+        str = str.normalize(sensitivity === 'variant' ? 'NFC' : 'NFKD')
+        if (ignoreMarks) str = str.replace(/(?=\p{Diacritic})\p{M}/gu, '')
+        if (ignoreCase) str = str.toLocaleUpperCase(locale).toLocaleLowerCase(locale)
+        return str.normalize('NFC')
+    }
+    const characters = /\P{M}\p{M}*|\p{M}+/gu
+    const fold = str => {
+        let out = ''
+        const from = [], to = [], first = [], last = []
+        for (const { 0: char, index } of str.matchAll(characters)) {
+            const norm = normalize(char)
+            if (!norm || norm === ' ' && out.endsWith(' ')) continue
+            // a match can start or end between the characters that a character becomes
+            // (e.g. 'f' and 'i' for 'ﬁ'), but not between a letter and its marks
+            for (const { 0: c } of norm.matchAll(characters)) for (let i = 0; i < c.length; i++) {
+                from.push(index)
+                to.push(index + char.length)
+                first.push(i === 0)
+                last.push(i === c.length - 1)
+            }
+            out += norm
+        }
+        return { out, from, to, first, last }
+    }
+    const needle = fold(query).out
+    if (!needle) return
+    const loc = locateInStrings(strs)
+    const { out: haystack, from, to, first, last } = fold(loc.text)
+    let previous = null
+    for (let index = haystack.indexOf(needle); index > -1; index = haystack.indexOf(needle, index + 1)) {
+        const end = index + needle.length - 1
+        if (!first[index] || !last[end]) continue
+        // a match covers the whole characters it starts and ends in, so
+        // several can be the same (e.g. 's' in 'ß'): only the first one is kept
+        if (previous?.start === from[index] && previous.end === to[end]) continue
+        previous = { start: from[index], end: to[end] }
+        const [startIndex, startOffset] = loc.start(from[index])
+        const [endIndex, endOffset] = loc.end(to[end])
+        const range = { startIndex, startOffset, endIndex, endOffset }
+        yield { range, excerpt: makeExcerpt(strs, range) }
+    }
 }
 
 const segmenterSearch = function* (strs, query, options = {}) {
     const { locales = 'en', granularity = 'word', sensitivity = 'base' } = options
     let { ignorePunctuation } = options
-    let segmenter, collator
+    let collator
     try {
-        segmenter = new Intl.Segmenter(locales, { granularity })
         collator = new Intl.Collator(locales, { usage: 'search', sensitivity, ignorePunctuation })
     } catch (e) {
         console.warn(e)
-        segmenter = new Intl.Segmenter('en', { granularity })
         collator = new Intl.Collator('en', { usage: 'search', sensitivity, ignorePunctuation })
     }
     // in case ignorePunctuation is undefined and a locale defaults to true
@@ -64,48 +136,150 @@ const segmenterSearch = function* (strs, query, options = {}) {
 
     // in case an invalid locale has been passed to the collator
     const locale = collator.resolvedOptions().locale
+    const graphemes = new Intl.Segmenter(locale, { granularity: 'grapheme' })
+    const words = granularity === 'word' ? new Intl.Segmenter(locale, { granularity: 'word' }) : null
 
-    // with granularity === 'grapheme', a grapheme that the collator considers
-    // equal to several graphemes (e.g. 'ß' and 'ss') would never match, so it is
-    // split into parts, each one keeping the offset and length of the original
-    const expand = sensitivity === 'base' && granularity === 'grapheme'
-    const segmentText = function* (str) {
-        for (const { index, segment } of segmenter.segment(str)) {
-            if (expand) {
-                const norm = segment.toLocaleLowerCase(locale).toLocaleUpperCase(locale)
-                const parts = norm === segment ? []
-                    : Array.from(segmenter.segment(norm), x => x.segment)
-                if (parts.length > 1 && collator.compare(segment, norm) === 0) {
-                    for (const [i, part] of parts.entries()) yield {
-                        index, segment: part, length: segment.length,
-                        isFirst: i === 0, isLast: i === parts.length - 1,
-                    }
-                    continue
-                }
+    // the query is compared with as many graphemes of the text, so a grapheme that the
+    // collator considers equal to several graphemes (e.g. 'ß' and 'ss', 'ﬁ' and 'fi',
+    // '㎏' and 'kg') would never match them: it is split into them, each part keeping
+    // the offset and length of the original
+    const splits = new Map()
+    const split = segment => {
+        let parts = splits.get(segment)
+        if (parts !== undefined) return parts
+        parts = null
+        const upper = segment.toLocaleUpperCase(locale)
+        for (const candidate of [
+            segment.normalize('NFKC'),
+            upper,
+            upper.toLocaleLowerCase(locale),
+            segment.toLocaleLowerCase(locale).toLocaleUpperCase(locale),
+        ]) {
+            if (candidate === segment) continue
+            const p = Array.from(graphemes.segment(candidate), x => x.segment)
+            if (p.length > 1 && collator.compare(segment, candidate) === 0) {
+                parts = p
+                break
             }
-            yield { index, segment, length: segment.length, isFirst: true, isLast: true }
         }
+        splits.set(segment, parts)
+        return parts
     }
 
-    const ipRegExp = /[^\p{P}\p{Z}\t\n\v\f\r\u0085]/u
-    const querySegments = []
-    for (const { segment } of segmentText(query)) {
-        if (!/[^\p{Format}]/u.test(segment)) continue
-        if (ignorePunctuation && !ipRegExp.test(segment)) continue
-        if (/\s/u.test(segment)) {
-            if (!/\s/u.test(querySegments[querySegments.length - 1]))
-                querySegments.push(' ')
-            continue
+    // the units compared with the query: graphemes (or their parts), without formatting
+    // characters (e.g. soft hyphens), other characters that the collator ignores (e.g. the
+    // Arabic tatweel, except with sensitivity 'variant') and, if ignorePunctuation, without
+    // punctuation and white space, otherwise with each run of white space as a single ' ';
+    // each different segment of a unit has an id (its index in segments), and kind() tells,
+    // once for each different grapheme, if it is skipped (null), white space (' '),
+    // or the ids of its parts
+    const segments = []
+    const segmentIds = new Map()
+    const idOf = segment => {
+        let id = segmentIds.get(segment)
+        if (id === undefined) {
+            id = segments.push(segment) - 1
+            segmentIds.set(segment, id)
         }
-        querySegments.push(segment)
+        return id
     }
-    const normalizedQuery = querySegments.join('')
-    if (!querySegments.length) return
+    const spaceId = idOf(' ')
+    const kinds = new Map()
+    const kind = segment => {
+        let k = kinds.get(segment)
+        if (k !== undefined) return k
+        if (!/[^\p{Format}]/u.test(segment) || ignorePunctuation && !ipRegExp.test(segment)) k = null
+        else if (/\s/u.test(segment)) k = ' '
+        else if (collator.compare(segment, '') === 0) k = null
+        else k = (split(segment) ?? [segment]).map(idOf)
+        kinds.set(segment, k)
+        return k
+    }
+
+    // the flags of a unit
+    const FIRST = 1  // the first part of its character
+    const LAST = 2  // the last part of its character
+    // with whole words: in another word than the previous unit, and not right after it
+    const SEPARATED = 4
+    // a typed array of the given length with the elements of array
+    const resize = (array, length) => {
+        const copy = new array.constructor(length)
+        copy.set(array)
+        return copy
+    }
+    // the units of a string, in typed arrays rather than as objects, which would take several
+    // times more memory (a text can have hundreds of thousands of units): for the unit i,
+    // its offsets in the string (from starts[i] to ends[i]), the id of its segment and its
+    // flags; the segments of the units are joined, so that the segments of any sequence of
+    // units are a slice of the joined string (from offsets[i] to offsets[j]); with whole
+    // words, isEdge has 1 at the offsets where words start and at the end of the string
+    const units = str => {
+        let size = str.length + 16
+        let starts = new Int32Array(size)
+        let ends = new Int32Array(size)
+        let ids = new Int32Array(size)
+        let flags = new Uint8Array(size)
+        let count = 0
+        let previousWord = -1
+        const add = (start, end, word, id, flag) => {
+            // a character can have more parts than code units (e.g. 'ﬃ')
+            if (count === size) {
+                size *= 2
+                starts = resize(starts, size)
+                ends = resize(ends, size)
+                ids = resize(ids, size)
+                flags = resize(flags, size)
+            }
+            if (count && word !== previousWord && start > ends[count - 1]) flag |= SEPARATED
+            starts[count] = start
+            ends[count] = end
+            ids[count] = id
+            flags[count] = flag
+            previousWord = word
+            count++
+        }
+        // with whole words, the index of the word of each unit tells if it's separated
+        const wordStarts = words ? Array.from(words.segment(str), x => x.index) : []
+        const isEdge = new Uint8Array(words ? str.length + 1 : 0)
+        if (words) {
+            for (const offset of wordStarts) isEdge[offset] = 1
+            isEdge[str.length] = 1
+        }
+        let word = 0
+        let space = null
+        for (const { index, segment } of graphemes.segment(str)) {
+            const k = kind(segment)
+            if (k === null) continue
+            while (word + 1 < wordStarts.length && wordStarts[word + 1] <= index) word++
+            const end = index + segment.length
+            // a run of white space is a single unit, added when the run ends
+            if (k === ' ') {
+                if (space) space.end = end
+                else space = { start: index, end, word }
+                continue
+            }
+            if (space) add(space.start, space.end, space.word, spaceId, FIRST | LAST)
+            space = null
+            for (let i = 0; i < k.length; i++)
+                add(index, end, word, k[i], (i === 0 ? FIRST : 0) | (i === k.length - 1 ? LAST : 0))
+        }
+        if (space) add(space.start, space.end, space.word, spaceId, FIRST | LAST)
+        const offsets = new Int32Array(count + 1)
+        const unitSegments = new Array(count)
+        for (let i = 0; i < count; i++) {
+            unitSegments[i] = segments[ids[i]]
+            offsets[i + 1] = offsets[i] + unitSegments[i].length
+        }
+        return { count, starts, ends, ids, flags, offsets, joined: unitSegments.join(''), isEdge }
+    }
+
+    const queryUnits = units(query)
+    if (!queryUnits.count) return
+    const normalizedQuery = queryUnits.joined
 
     // when ignoring punctuation, the match is extended to the punctuation marks that the
     // query has before its first and after its last searched character, as long as the
     // text has the same marks there (white space and formatting characters aside)
-    const graphemes = new Intl.Segmenter(locale, { granularity: 'grapheme' })
     const isSkipped = s => !/\S/u.test(s) || !/[^\p{Format}]/u.test(s)
     const edgeMarks = segs => {
         const marks = []
@@ -153,61 +327,52 @@ const segmenterSearch = function* (strs, query, options = {}) {
         return end
     }
 
-    const substrArr = []
-    let strIndex = 0
-    let segments = segmentText(strs[strIndex])
-    main: while (strIndex < strs.length) {
-        while (substrArr.length < querySegments.length) {
-            const { done, value } = segments.next()
-            if (done) {
-                // the current string is exhausted
-                // move on to the next string
-                strIndex++
-                if (strIndex < strs.length) {
-                    segments = segmentText(strs[strIndex])
-                    continue
-                } else break main
-            }
-            const { index, segment } = value
-            // ignore formatting characters
-            if (!/[^\p{Format}]/u.test(segment)) continue
-            // ignore punctuation if requested
-            if (ignorePunctuation && !ipRegExp.test(segment)) continue
-            // normalize whitespace
-            if (/\s/u.test(segment)) {
-                if (!/\s/u.test(substrArr[substrArr.length - 1]?.segment))
-                    substrArr.push({ strIndex, index, segment: ' ', length: 1, isFirst: true, isLast: true })
-                continue
-            }
-            value.strIndex = strIndex
-            substrArr.push(value)
-        }
-        const substr = substrArr.map(x => x.segment).join('')
-        const firstSeg = substrArr[0]
-        const lastSeg = substrArr[substrArr.length - 1]
-        // when ignoring punctuation, normalizedQuery and substr combine multiple words into one,
-        // so, to match whole words only, it is necessary to compare the segments separately
-        if (firstSeg.isFirst && lastSeg.isLast && (ignorePunctuation && granularity === 'word'
-                ? querySegments.every((seg, i) => collator.compare(seg, substrArr[i].segment) === 0)
-                : collator.compare(normalizedQuery, substr) === 0)) {
-            const endIndex = strIndex
-            const endOffset = lastSeg.index + lastSeg.length
-            const startIndex = firstSeg.strIndex
-            const startOffset = firstSeg.index
-            const range = { startIndex, startOffset, endIndex, endOffset }
-            if (leadingMarks.length) [range.startIndex, range.startOffset] = extendStart(startIndex, startOffset)
-            if (trailingMarks.length) [range.endIndex, range.endOffset] = extendEnd(endIndex, endOffset)
-            yield { range, excerpt: makeExcerpt(strs, range) }
-        }
-        substrArr.shift()
+    const loc = locateInStrings(strs)
+    const { count, starts, ends, ids, flags, offsets, joined, isEdge } = units(loc.text)
+
+    // with whole words, a match starts and ends at the edges of words; the edges of the
+    // strings count too, as they can be the edges of blocks, e.g. <p>Chapter 1</p><p>The</p>
+    if (words) for (const offset of loc.starts) isEdge[offset] = 1
+    // the words in the match must be separated (by something skipped) where those of the
+    // query are: e.g. ignoring punctuation and white space, 'ab' isn't a whole word
+    // in 'a, b', while 'dont' is one in "don't"
+    const length = queryUnits.count
+    const sameSeparations = i => {
+        for (let k = 1; k < length; k++)
+            if ((flags[i + k] & SEPARATED) !== (queryUnits.flags[k] & SEPARATED)) return false
+        return true
+    }
+    // a quick check before comparing a whole sequence: its first unit must be equal to the
+    // first unit of the query (computed once for each different segment)
+    const firstSegment = segments[queryUnits.ids[0]]
+    const startsLikeQuery = segments.map(segment => collator.compare(segment, firstSegment) === 0)
+
+    let previousStart = -1
+    let previousEnd = -1
+    for (let i = 0; i + length <= count; i++) {
+        const last = i + length - 1
+        if (!startsLikeQuery[ids[i]]) continue
+        // a part of a character is not a whole word
+        if (words && !((flags[i] & FIRST) && (flags[last] & LAST) && isEdge[starts[i]] && isEdge[ends[last]])) continue
+        // otherwise a match can start or end inside a character, and it covers the whole
+        // character (e.g. 'ine' in 'ﬁne', 'stras' in 'straße'), so several sequences can
+        // give the same match (e.g. 's' in 'ß'): only the first one is kept
+        if (starts[i] === previousStart && ends[last] === previousEnd) continue
+        if (collator.compare(normalizedQuery, joined.slice(offsets[i], offsets[i + length])) !== 0) continue
+        if (words && !sameSeparations(i)) continue
+        previousStart = starts[i]
+        previousEnd = ends[last]
+        const [startIndex, startOffset] = loc.start(starts[i])
+        const [endIndex, endOffset] = loc.end(ends[last])
+        const range = { startIndex, startOffset, endIndex, endOffset }
+        if (leadingMarks.length) [range.startIndex, range.startOffset] = extendStart(startIndex, startOffset)
+        if (trailingMarks.length) [range.endIndex, range.endOffset] = extendEnd(endIndex, endOffset)
+        yield { range, excerpt: makeExcerpt(strs, range) }
     }
 }
 
 export const search = (strs, query, options) => {
-    const { granularity = 'grapheme', sensitivity = 'base', ignorePunctuation = false } = options
-    if (!Intl?.Segmenter || granularity === 'grapheme'
-    && (sensitivity === 'variant' || sensitivity === 'accent') && !ignorePunctuation)
-        return simpleSearch(strs, query, options)
+    if (!Intl?.Segmenter) return simpleSearch(strs, query, options)
     return segmenterSearch(strs, query, options)
 }
 
@@ -227,7 +392,7 @@ export const searchMatcher = (textWalker, opts) => {
 export const searchOptions = (doc, opts) => {
     const { defaultLocale, matchCase, matchDiacritics, matchWholeWords, ignorePunctuation } = opts
     return {
-        locales: doc.body?.lang || doc.documentElement?.lang || defaultLocale || 'en',
+        locales: doc?.body?.lang || doc?.documentElement?.lang || defaultLocale || 'en',
         granularity: matchWholeWords ? 'word' : 'grapheme',
         sensitivity: matchDiacritics && matchCase
             ? 'variant'
@@ -320,7 +485,7 @@ const splitMatch = ({ startIndex, startOffset, endIndex, endOffset }, segs) => {
     for (const { w, from, to } of segs) {
         if (from === to || endIndex < from || startIndex >= to) continue
         const [si, so] = startIndex >= from ? [startIndex - from, startOffset] : [0, 0]
-        const [ei, eo] = endIndex < to // also catches simpleSearch's "offset 0 of the next string"
+        const [ei, eo] = endIndex < to
             ? [endIndex - from, endOffset]
             : [to - from - 1, w.strs[to - from - 1].length]
         if (parts.length && !w.strs.slice(si, ei + 1).some(s => s.trim())) continue // blank page
