@@ -34,10 +34,8 @@ const makeZipLoader = async file => {
         strictness: 'tolerant', maxAppendedDataSize: 1024 * 1024 })
     const entries = await reader.getEntries()
     const map = new Map(entries.map(entry => [entry.filename, entry]))
-    const load = f => (name, ...args) =>
-        map.has(name) ? f(map.get(name), ...args) : null
-    const loadText = load(entry => entry.getData(new TextWriter()))
-    const loadBlob = load((entry, type) => entry.getData(new BlobWriter(type)))
+    const loadText = name => map.get(name)?.getData(new TextWriter()) ?? null
+    const loadBlob = (name, type) => map.get(name)?.getData(new BlobWriter(type)) ?? null
     const getSize = name => map.get(name)?.uncompressedSize ?? 0
     return { entries, loadText, loadBlob, getSize }
 }
