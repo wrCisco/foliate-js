@@ -5,17 +5,22 @@ import { copy } from 'fs-extra'
 const copyPDFJS = () => ({
     name: 'copy-pdfjs',
     async writeBundle() {
-        await copy('node_modules/pdfjs-dist/build/pdf.mjs', 'vendor/pdfjs/pdf.mjs')
-        await copy('node_modules/pdfjs-dist/build/pdf.mjs.map', 'vendor/pdfjs/pdf.mjs.map')
-        await copy('node_modules/pdfjs-dist/build/pdf.worker.mjs', 'vendor/pdfjs/pdf.worker.mjs')
-        await copy('node_modules/pdfjs-dist/build/pdf.worker.mjs.map', 'vendor/pdfjs/pdf.worker.mjs.map')
+        await copy('node_modules/pdfjs-dist/legacy/build/pdf.min.mjs', 'vendor/pdfjs/pdf.min.mjs')
+        await copy('node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', 'vendor/pdfjs/pdf.worker.min.mjs')
         await copy('node_modules/pdfjs-dist/cmaps', 'vendor/pdfjs/cmaps')
         await copy('node_modules/pdfjs-dist/standard_fonts', 'vendor/pdfjs/standard_fonts')
+        await copy('node_modules/pdfjs-dist/wasm', 'vendor/pdfjs/wasm', { filter: src => !/quickjs/i.test(src) })
+        await copy('node_modules/pdfjs-dist/iccs', 'vendor/pdfjs/iccs')
+        // for debugging purposes
+        // await copy('node_modules/pdfjs-dist/legacy/build/pdf.mjs', 'vendor/pdfjs/pdf.mjs')
+        // await copy('node_modules/pdfjs-dist/legacy/build/pdf.mjs.map', 'vendor/pdfjs/pdf.mjs.map')
+        // await copy('node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', 'vendor/pdfjs/pdf.worker.mjs')
+        // await copy('node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs.map', 'vendor/pdfjs/pdf.worker.mjs.map')
     },
 })
 
 export default [{
-    input: 'rollup/fflate.js',
+    input: './rollup/fflate.js',
     output: {
         dir: 'vendor/',
         format: 'esm',
@@ -23,7 +28,7 @@ export default [{
     plugins: [nodeResolve(), terser()],
 },
 {
-    input: 'rollup/zip.js',
+    input: './rollup/zip.js',
     output: {
         dir: 'vendor/',
         format: 'esm',

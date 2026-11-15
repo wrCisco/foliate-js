@@ -1,16 +1,16 @@
 const PDFJS_BASE = new URL(/* @vite-ignore */'../vendor/pdfjs/', import.meta.url).href
 const pdfjsPath = path => PDFJS_BASE + path
 
-import './vendor/pdfjs/pdf.mjs'
+import './vendor/pdfjs/pdf.min.mjs'
 const pdfjsLib = globalThis.pdfjsLib
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsPath('pdf.worker.mjs')
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsPath('pdf.worker.min.mjs')
 
 const fetchText = async url => await (await fetch(url)).text()
 
-// https://raw.githubusercontent.com/mozilla/pdf.js/refs/tags/v5.5.207/web/text_layer_builder.css
+// https://raw.githubusercontent.com/mozilla/pdf.js/refs/tags/v6.5.438/web/text_layer_builder.css
 const textLayerBuilderCSS = await fetchText(pdfjsPath('text_layer_builder.css'))
 
-// https://raw.githubusercontent.com/mozilla/pdf.js/refs/tags/v5.5.207/web/annotation_layer_builder.css
+// https://raw.githubusercontent.com/mozilla/pdf.js/refs/tags/v6.5.438/web/annotation_layer_builder.css
 const annotationLayerBuilderCSS = await fetchText(pdfjsPath('annotation_layer_builder.css'))
 
 const render = async (page, doc, zoom) => {
@@ -53,28 +53,25 @@ const render = async (page, doc, zoom) => {
         container.onpointerup = () => container.classList.remove('selecting')
     }
 
-    // hide "offscreen" canvases appended to docuemnt when rendering text layer
-    // https://github.com/mozilla/pdf.js/blob/642b9a5ae67ef642b9a8808fd9efd447e8c350e2/web/pdf_viewer.css#L51-L58
-    for (const canvas of document.querySelectorAll('.hiddenCanvasElement'))
-        Object.assign(canvas.style, {
-            position: 'absolute',
-            top: '0',
-            left: '0',
-            width: '0',
-            height: '0',
-            display: 'none',
-        })
-
     if (doc._annotationLayer) doc._annotationLayer.update({ viewport })
     else {
         const div = doc.querySelector('.annotationLayer')
         const linkService = {
-            goToDestination: () => {},
-            getDestinationHash: dest => JSON.stringify(dest),
+            // the return value becomes the href attribute of <a> in the annotationLayer during rendering
             addLinkAttributes: (link, url) => link.href = url,
+            getDestinationHash: dest => (dest ? JSON.stringify(dest) : ''),
+            getAnchorUrl: () => '',
+            // foliate implements on its own navigation through links, the other actions aren't supported
+            goToDestination: () => {},
+            executeNamedAction: () => {},
+            executeSetOCGState: () => {},
+            getAttachmentContent: async () => null,
+            // no eventBus: don't support scripting and editing for now
         }
         const annotationLayer = new pdfjsLib.AnnotationLayer({ page, viewport, div, linkService })
-        await annotationLayer.render({ annotations: await page.getAnnotations() })
+        await annotationLayer.render({ annotations: await page.getAnnotations(), enableScripting: false })
+        // named/OCG/attachment/reset-form actions aren't supported: make them inert
+        for (const a of div.querySelectorAll('a[href=""]')) a.removeAttribute('href')
         doc._annotationLayer = annotationLayer
     }
 }
@@ -147,7 +144,9 @@ export const makePDF = async file => {
         range: transport,
         cMapUrl: pdfjsPath('cmaps/'),
         standardFontDataUrl: pdfjsPath('standard_fonts/'),
-        isEvalSupported: false,
+        wasmUrl: pdfjsPath('wasm/'),
+        iccUrl: pdfjsPath('iccs/'),
+        // isEvalSupported: false,  // used in older versions, ignored in 6.5.438
     }).promise
 
     const book = { rendition: { layout: 'pre-paginated' } }
@@ -240,12 +239,6 @@ export const makePDF = async file => {
                     prev = current
                 }
             }
-            // textLayer.querySelectorAll('span:not(.markedContent)').forEach(elem => {
-            //     if (elem.tagName === 'SPAN' && elem.nextElementSibling?.tagName === 'BR') {
-            //         if (elem.textContent.at(-1) === '-') elem.textContent = elem.textContent.slice(0, elem.textContent.length - 1)
-            //         else elem.textContent += ' '
-            //     }
-            // })
             return doc
         },
         size: 1000,

@@ -30,7 +30,8 @@ const makeZipLoader = async file => {
     const { configure, ZipReader, BlobReader, TextWriter, BlobWriter } =
         await import('./vendor/zip.js')
     configure({ useWebWorkers: false })
-    const reader = new ZipReader(new BlobReader(file))
+    const reader = new ZipReader(new BlobReader(file), {
+        strictness: 'tolerant', maxAppendedDataSize: 1024 * 1024 })
     const entries = await reader.getEntries()
     const map = new Map(entries.map(entry => [entry.filename, entry]))
     const load = f => (name, ...args) =>
