@@ -356,14 +356,25 @@ export class View extends HTMLElement {
         doc.addEventListener('click', e => {
             const a = e.target.closest('a[href]')
             if (!a) return
-            e.preventDefault()
             const href_ = a.getAttribute('href')
             const href = section?.resolveHref?.(href_) ?? href_
-            if (book?.isExternal?.(href))
-                Promise.resolve(this.#emit('external-link', { a, href_ }, true))
-                    .then(x => x ? globalThis.open(href_, '_blank') : null)
-                    .catch(e => console.error(e))
-            else Promise.resolve(this.#emit('link', { a, href }, true))
+            if (book?.isExternal?.(href)) {
+                const detail = { a, href: href_, native: false }
+                const proceed = this.#emit('external-link', detail, true)
+                // a listener can let the browser follow the link in the iframe
+                if (detail.native) return
+                e.preventDefault()
+                if (!proceed) return
+                let url
+                try {
+                    url = new URL(href_)
+                } catch { return }
+                if (['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol))
+                    globalThis.open(url.href, '_blank', 'noopener')
+                return
+            }
+            e.preventDefault()
+            Promise.resolve(this.#emit('link', { a, href }, true))
                 .then(x => x ? this.goTo(href) : null)
                 .catch(e => console.error(e))
         })
