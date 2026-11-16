@@ -670,6 +670,7 @@ function rawBytesToString(uint8Array) {
 class MOBI6 {
     parser = new DOMParser()
     serializer = new XMLSerializer()
+    transformTarget = new EventTarget()
     #resourceCache = new Map()
     #textCache = new Map()
     #cache = new Map()
@@ -864,8 +865,16 @@ class MOBI6 {
         }`))
 
         await this.replaceResources(doc)
-        const result = this.serializer.serializeToString(doc)
-        const url = URL.createObjectURL(new Blob([result], { type: this.#type }))
+        const detail = {
+            data: this.serializer.serializeToString(doc),
+            type: this.#type,
+            name: `section${this.#sections.indexOf(section)}`,
+        }
+        const event = new CustomEvent('data', { detail })
+        this.transformTarget.dispatchEvent(event)
+        const data = await event.detail.data
+        const type = await event.detail.type
+        const url = URL.createObjectURL(new Blob([data], { type }))
         this.#cache.set(section, url)
         return url
     }
@@ -1184,8 +1193,16 @@ class KF8 {
             for (const el of doc.querySelectorAll(`img[src="${url}"]`))
                 el.replaceWith(node)
         }
-        const url = URL.createObjectURL(
-            new Blob([this.serializer.serializeToString(doc)], { type: this.#type }))
+        const detail = {
+            data: this.serializer.serializeToString(doc),
+            type: this.#type,
+            name: section.skel.name,
+        }
+        const event = new CustomEvent('data', { detail })
+        this.transformTarget.dispatchEvent(event)
+        const data = await event.detail.data
+        const type = await event.detail.type
+        const url = URL.createObjectURL(new Blob([data], { type }))
         this.#cache.set(section, url)
         return url
     }
