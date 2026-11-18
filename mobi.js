@@ -667,6 +667,10 @@ function rawBytesToString(uint8Array) {
     return result
 }
 
+const serializeHTML = doc => (doc.doctype
+    ? new XMLSerializer().serializeToString(doc.doctype) + '\n' : '')
+    + doc.documentElement.outerHTML
+
 class MOBI6 {
     parser = new DOMParser()
     serializer = new XMLSerializer()
@@ -866,7 +870,7 @@ class MOBI6 {
 
         await this.replaceResources(doc)
         const detail = {
-            data: this.serializer.serializeToString(doc),
+            data: serializeHTML(doc),
             type: this.#type,
             name: `section${this.#sections.indexOf(section)}`,
         }
@@ -1194,7 +1198,7 @@ class KF8 {
                 el.replaceWith(node)
         }
         const detail = {
-            data: this.serializer.serializeToString(doc),
+            data: (this.#type === MIME.HTML ? serializeHTML(doc) : this.serializer.serializeToString(doc)),
             type: this.#type,
             name: section.skel.name,
         }

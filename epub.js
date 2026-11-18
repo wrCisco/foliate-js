@@ -858,7 +858,9 @@ class Loader {
                 el.setAttribute('style',
                     await this.replaceCSS(el.getAttribute('style'), href, parents))
             // TODO: replace inline scripts? probably not worth the trouble
-            const result = new XMLSerializer().serializeToString(doc)
+            const result = item.mediaType === MIME.HTML
+                ? serializeHTML(doc)
+                : new XMLSerializer().serializeToString(doc)
             return this.createURL(href, result, item.mediaType, parent)
         }
 
@@ -906,6 +908,10 @@ class Loader {
         for (const url of this.#cache.values()) URL.revokeObjectURL(url)
     }
 }
+
+const serializeHTML = doc => (doc.doctype
+    ? new XMLSerializer().serializeToString(doc.doctype) + '\n' : '')
+    + doc.documentElement.outerHTML
 
 const getHTMLFragment = (doc, id) => doc.getElementById(id)
     ?? doc.querySelector(`[name="${CSS.escape(id)}"]`)
