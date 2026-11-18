@@ -275,8 +275,7 @@ export const makeFB2 = async blob => {
         book.getCover = () => {
             let allow = true
             if (!src.startsWith('data:')) {
-                const detail = { src, allow: false }
-                const event = new CustomEvent('fetch-external-resource', { detail })
+                const event = new CustomEvent('fetch-external-resource', { detail: { allow }})
                 book.transformTarget.dispatchEvent(event)
                 allow = event.detail.allow
             }
