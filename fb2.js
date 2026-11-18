@@ -233,6 +233,7 @@ export const makeFB2 = async blob => {
     const book = {}
     const doc = await parseXML(blob)
     const converter = new FB2Converter(doc)
+    book.transformTarget = new EventTarget()
 
     const $ = x => doc.querySelector(x)
     const $$ = x => [...doc.querySelectorAll(x)]
@@ -271,7 +272,16 @@ export const makeFB2 = async blob => {
     }
     if ($('coverpage image')) {
         const src = converter.getImageSrc($('coverpage image'))
-        book.getCover = () => fetch(src).then(res => res.blob())
+        book.getCover = () => {
+            let allow = true
+            if (!src.startsWith('data:')) {
+                const detail = { src, allow: false }
+                const event = new CustomEvent('fetch-external-resource', { detail })
+                book.transformTarget.dispatchEvent(event)
+                allow = event.detail.allow
+            }
+            if (allow) return fetch(src).then(res => res.blob())
+        }
     } else book.getCover = () => null
 
     // get convert each body
@@ -284,7 +294,7 @@ export const makeFB2 = async blob => {
         }), converted]
     })
 
-    const urls = []
+    const urls = new Map()
     const sectionData = bodyData[0][0]
         // make a separate section for each section in the first body
         .map(({ el, ids }) => {
@@ -303,16 +313,26 @@ export const makeFB2 = async blob => {
             body.classList.add('notesBodyType')
             return { ids, el: body, linear: 'no' }
         }))
-        .map(({ ids, titles, el, linear }) => {
+        .map(({ ids, titles, el, linear }, index) => {
             const str = template(el.outerHTML)
             const blob = new Blob([str], { type: MIME.XHTML })
-            const url = URL.createObjectURL(blob)
-            urls.push(url)
             const title = normalizeWhitespace(
                 el.querySelector('.title, .subtitle, p')?.textContent
                 ?? (el.classList.contains('title') ? el.textContent : ''))
+            const load = async () => {
+                if (urls.has(index)) return urls.get(index)
+                const detail = { data: str, type: MIME.XHTML, name: title }
+                const event = new CustomEvent('data', { detail })
+                book.transformTarget.dispatchEvent(event)
+                const data = await event.detail.data
+                const type = await event.detail.type
+                const blob = new Blob([data], { type })
+                const url = URL.createObjectURL(blob)
+                urls.set(index, url)
+                return url
+            }
             return {
-                ids, title, titles, load: () => url,
+                ids, title, titles, load,
                 createDocument: () => new DOMParser().parseFromString(str, MIME.XHTML),
                 // doo't count image data as it'd skew the size too much
                 size: blob.size - Array.from(el.querySelectorAll('[src]'),
@@ -354,7 +374,7 @@ export const makeFB2 = async blob => {
     book.isExternal = uri => /^\w+:/i.test(uri)
 
     book.destroy = () => {
-        for (const url of urls) URL.revokeObjectURL(url)
+        for (const url of urls.values()) URL.revokeObjectURL(url)
     }
     return book
 }
