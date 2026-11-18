@@ -186,12 +186,24 @@ const getDirection = doc => {
     return { vertical, rtl }
 }
 
-const getBackground = doc => {
-    const bodyStyle = doc.defaultView.getComputedStyle(doc.body)
-    return bodyStyle.backgroundColor === 'rgba(0, 0, 0, 0)'
+const getBackground = (doc, target) => {
+    const win = doc.defaultView
+    const bodyStyle = win.getComputedStyle(doc.body)
+    const style = bodyStyle.backgroundColor === 'rgba(0, 0, 0, 0)'
         && bodyStyle.backgroundImage === 'none'
-        ? doc.defaultView.getComputedStyle(doc.documentElement).background
-        : bodyStyle.background
+        ? win.getComputedStyle(doc.documentElement) : bodyStyle
+    let allow = true
+    if (target) {
+        const event = new CustomEvent('fetch-external-resource', { detail: { allow }})
+        target.dispatchEvent(event)
+        allow = event.detail.allow
+    }
+    if (allow) return style.background
+    else {
+        const urls = Array.from(style.backgroundImage.matchAll(/url\(\s*(["']?)(.*?)\1\s*\)/g), m => m[2])
+        return urls.every(url => /^(?:blob|data):/i.test(url))
+            ? style.background : style.backgroundColor
+    }
 }
 
 const makeMarginals = (length, part) => Array.from({ length }, () => {
@@ -250,7 +262,7 @@ class View {
     get document() {
         return this.#iframe.contentDocument
     }
-    async load(src, afterLoad, beforeRender) {
+    async load(src, afterLoad, beforeRender, eventTarget) {
         if (typeof src !== 'string') throw new Error(`${src} is not string`)
         return new Promise(resolve => {
             this.#iframe.addEventListener('load', () => {
@@ -260,7 +272,7 @@ class View {
                 // it needs to be visible for Firefox to get computed style
                 this.#iframe.style.display = 'block'
                 const { vertical, rtl } = getDirection(doc)
-                const background = getBackground(doc)
+                const background = getBackground(doc, eventTarget)
                 this.#iframe.style.display = 'none'
 
                 this.#vertical = vertical
@@ -622,7 +634,7 @@ export class Paginator extends HTMLElement {
 
         this.#mediaQueryListener = () => {
             if (!this.#view) return
-            this.#background.style.background = getBackground(this.#view.document)
+            this.#background.style.background = getBackground(this.#view.document, this.bookEventTarget)
         }
         this.#mediaQuery.addEventListener('change', this.#mediaQueryListener)
     }
@@ -647,6 +659,7 @@ export class Paginator extends HTMLElement {
     open(book) {
         this.bookDir = book.dir
         this.sections = book.sections
+        this.bookEventTarget = book.transformTarget
         book.transformTarget?.addEventListener('data', ({ detail }) => {
             if (detail.type !== 'text/css') return
             const w = innerWidth
@@ -1033,7 +1046,7 @@ export class Paginator extends HTMLElement {
                 onLoad?.({ doc, index })
             }
             const beforeRender = this.#beforeRender.bind(this)
-            await view.load(src, afterLoad, beforeRender)
+            await view.load(src, afterLoad, beforeRender, this.bookEventTarget)
             // in case the view is replaced by a newer #display (or destroyed) while loading
             if (this.#view !== view) return
             this.dispatchEvent(new CustomEvent('create-overlayer', {
@@ -1159,7 +1172,7 @@ export class Paginator extends HTMLElement {
 
         // NOTE: needs `requestAnimationFrame` in Chromium
         requestAnimationFrame(() =>
-            this.#background.style.background = getBackground(this.#view.document))
+            this.#background.style.background = getBackground(this.#view.document, this.bookEventTarget))
 
         // needed because the resize observer doesn't work in Firefox
         this.#view?.document?.fonts?.ready?.then(() => this.#view.expand())
