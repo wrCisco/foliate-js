@@ -822,17 +822,15 @@ class Loader {
             // replace hrefs in XML processing instructions
             // this is mainly for SVGs that use xml-stylesheet
             if ([MIME.XHTML, MIME.SVG].includes(item.mediaType)) {
-                let child = doc.firstChild
-                while (child instanceof ProcessingInstruction) {
-                    if (child.data) {
-                        const replacedData = await replaceSeries(child.data,
-                            /(?:^|\s*)(href\s*=\s*['"])([^'"]*)(['"])/i,
-                            (_, p1, p2, p3) => this.loadHref(p2, href, parents)
-                                .then(p2 => `${p1}${p2}${p3}`))
-                        child.replaceWith(doc.createProcessingInstruction(
-                            child.target, replacedData))
-                    }
-                    child = child.nextSibling
+                for (const child of [...doc.childNodes]) {
+                    if (child === doc.documentElement) break
+                    if (!(child instanceof ProcessingInstruction) || !child.data) continue
+                    const replacedData = await replaceSeries(child.data,
+                        /(^|\s)(href\s*=\s*['"])([^'"]*)(['"])/i,
+                        (_, p0, p1, p2, p3) => this.loadHref(p2, href, parents)
+                            .then(p2 => `${p0}${p1}${p2}${p3}`))
+                    child.replaceWith(doc.createProcessingInstruction(
+                        child.target, replacedData))
                 }
             }
             // replace hrefs (excluding anchors)
