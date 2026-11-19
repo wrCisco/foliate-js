@@ -318,17 +318,18 @@ export const makeFB2 = async blob => {
             const title = normalizeWhitespace(
                 el.querySelector('.title, .subtitle, p')?.textContent
                 ?? (el.classList.contains('title') ? el.textContent : ''))
-            const load = async () => {
-                if (urls.has(index)) return urls.get(index)
+            const transform = async () => {
                 const detail = { data: str, type: MIME.XHTML, name: title }
                 const event = new CustomEvent('data', { detail })
                 book.transformTarget.dispatchEvent(event)
                 const data = await event.detail.data
                 const type = await event.detail.type
-                const blob = new Blob([data], { type })
-                const url = URL.createObjectURL(blob)
-                urls.set(index, url)
-                return url
+                return URL.createObjectURL(new Blob([data], { type }))
+            }
+            const load = () => {
+                if (!urls.has(index)) urls.set(index, transform()
+                    .catch(e => { urls.delete(index); throw e }))
+                return urls.get(index)
             }
             return {
                 ids, title, titles, load,
@@ -373,7 +374,7 @@ export const makeFB2 = async blob => {
     book.isExternal = uri => /^\w+:/i.test(uri)
 
     book.destroy = () => {
-        for (const url of urls.values()) URL.revokeObjectURL(url)
+        for (const p of urls.values()) p.then(url => URL.revokeObjectURL(url), () => {})
     }
     return book
 }
