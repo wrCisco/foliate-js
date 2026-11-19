@@ -50,7 +50,9 @@ const render = async (page, doc, zoom) => {
         container.append(endOfContent)
         // TODO: this only works in Firefox; see https://github.com/mozilla/pdf.js/pull/17923
         container.onpointerdown = () => container.classList.add('selecting')
-        container.onpointerup = () => container.classList.remove('selecting')
+        // listen to the whole document: other elements can cover the textLayer
+        doc.addEventListener('pointerup', () => container.classList.remove('selecting'))
+        doc.addEventListener('pointercancel', () => container.classList.remove('selecting'))
     }
 
     if (doc._annotationLayer) doc._annotationLayer.update({ viewport })
