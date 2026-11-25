@@ -63,7 +63,7 @@ export class FixedLayout extends HTMLElement {
             overflow: auto;
             scrollbar-gutter: stable both-edges;
             direction: ltr;
-            flex-direction: ${this.rtl ? 'row-reverse' : 'row'};
+            flex-direction: row;
         }`)
     }
     attributeChangedCallback(name, _, value) {
@@ -202,6 +202,7 @@ export class FixedLayout extends HTMLElement {
                 display: 'block',
                 flexShrink: '0',
                 marginBlock: 'auto',
+                order: this.rtl && frame === end ? '-1' : '',
             })
             if (portrait && frame !== target) {
                 element.style.display = 'none'
@@ -309,7 +310,6 @@ export class FixedLayout extends HTMLElement {
         const rtl = book.dir === 'rtl'
         const ltr = !rtl
         this.rtl = rtl
-        this.#setRendererStyle()
 
         if (rendition?.spread === 'none')
             this.#spreads = book.sections.map(section => ({ center: section }))
